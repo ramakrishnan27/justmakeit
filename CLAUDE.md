@@ -48,6 +48,8 @@ services inside Platform.Api. Adding a channel = fill in its project + one `buil
 dotnet build Platform.sln
 dotnet test  Platform.sln                              # needs Docker (Testcontainers starts postgres:16-alpine)
 dotnet test  Platform.sln --filter "Category!=Docker"  # everything that does not need Docker
+PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pooling=false"  dotnet test Platform.sln
+                                                       # Docker-tagged tests against a throwaway PostgreSQL instead of a container
 docker compose up -d                                   # local PostgreSQL 16 (copy .env.example to .env first)
 dotnet run --project src/Platform.Api                  # http://localhost:5080, Development, applies migrations
 node --test web/tests                                  # frontend unit tests (from Phase 6)
@@ -62,6 +64,10 @@ dotnet user-secrets --project src/Platform.Api set "Jwt:SigningKey" "<random, 32
 dotnet user-secrets --project src/Platform.Api set "ConnectionStrings:Migrator" "Host=localhost;Port=5433;Database=platform;Username=platform_owner;Password=<POSTGRES_PASSWORD from .env>"
 dotnet user-secrets --project src/Platform.Api set "ConnectionStrings:App" "Host=localhost;Port=5433;Database=platform;Username=app_user;Password=<pick one>"
 ```
+
+`PLATFORM_TEST_POSTGRES` must name a server that holds no real data: the migration creates the cluster-wide role
+`app_user` and the tests create and drop databases. Without Docker, `initdb`/`pg_ctl` from any local PostgreSQL install can
+start a private cluster on a spare port for this.
 
 `ConnectionStrings:Migrator` is the database owner (runs migrations). `ConnectionStrings:App` logs in as `app_user`; the
 migrator sets that role's password from this string, so it is configured in one place. Environment variables work too
@@ -112,7 +118,7 @@ or was skipped, and any open question.
 | Phase | Scope |
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
-| 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/* |
+| 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
 | 2 | `002_email.sql`, senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
@@ -148,5 +154,38 @@ or was skipped, and any open question.
   leaves support on 10 Nov 2026). `global.json` pins SDK 10.0.100 (rolls forward to the latest feature band), the
   `LangVersion` pin to 12 was dropped (C# 14 is the default), JwtBearer and Mvc.Testing moved to 10.0.14, and
   Testcontainers.PostgreSql to 4.16.0 (4.10.0 pulled in SSH.NET 2025.1.0, which has known high-severity advisories).
-  Npgsql stays on 8.0.9 and Swashbuckle on 7.3.2 (10.x changes the OpenApi model): both run on net10, and bumping them
-  waits until the Docker tests can run here.
+  Npgsql stays on 8.0.9 and Swashbuckle on 7.3.2 (10.x changes the OpenApi model): both run on net10; bumping them is a
+  deliberate upgrade pass (Phase 8), not something to do in passing.
+
+**Phase 1**
+- Endpoints (all JSON, camelCase, errors are `application/problem+json` with `code` and, for 400s, `errors` per field):
+  `POST /v1/auth/register|login|refresh|logout|switch-agency`, `GET /v1/auth/me`, `GET|POST /v1/workspaces`. Token
+  responses are `{accessToken, tokenType: "Bearer", expiresIn}`; the refresh token is never in a body.
+- Refresh cookie `refresh_token`: HttpOnly, **Secure always**, SameSite=Strict, Path=/v1/auth, lifetime `Jwt:RefreshTokenDays`
+  (30). Chrome and Firefox accept Secure cookies on http://localhost; Safari does not, so develop in Chrome or Firefox.
+  A failed refresh does not try to clear the cookie (the exception middleware calls `Response.Clear()`); logout always does.
+- Rotation is atomic: the replacement is inserted and the old token revoked only `WHERE revoked_at IS NULL` in one
+  transaction, so of N simultaneous refreshes with one cookie exactly one wins. Presenting a revoked token (or losing that
+  race) revokes every live token of that user for that agency and logs a warning. The role in a refreshed token comes from
+  the database, and a user who left the agency cannot refresh.
+- Policies live in Platform.Auth (`AuthPolicies`), their names in `Platform.Helpers.Constants.PolicyNames`: `CanRead` (any
+  role), `CanWrite` (owner/admin/manager), `CanManage` (owner/admin: members and workspaces). The **fallback policy requires a
+  signed-in user with an agency**, so anything not marked `[AllowAnonymous]` is closed; as a side effect a request for an
+  unknown route answers 401, not 404, when anonymous. Policies read the token's role claim, so a role change takes up to 15
+  minutes to reach an existing access token; services re-check the role, and `/me` and refresh read it from the database.
+- Passwords: PBKDF2-SHA256, 600,000 iterations, `pbkdf2$iterations$salt$hash`, iteration count read from the stored value,
+  constant-time compare. Registration needs 10 to 128 characters. Login verifies against a dummy hash when the email is
+  unknown, so timing does not reveal which emails exist.
+- Registration answers 409 `email_taken`, which does reveal that an address is registered. Accepted for usability; the
+  credentials rate limit is the mitigation.
+- Registration chooses the new agency and user ids first and opens its connection for them, so `agencies`, `users`,
+  `agency_members` and `workspaces` rows all pass their own policies in one transaction. Login and refresh find their rows
+  through `auth_find_user_by_email()` / `auth_find_refresh_token()`; `001_init.sql` was not touched.
+- Rate limits (`RateLimiting:Auth`): fixed window per client address, 10 requests/min for register+login (one shared
+  budget), 60/min for refresh, logout, switch-agency and me; counted before authentication. 429 is problem+json with
+  `Retry-After`. **Behind a reverse proxy every client shares the proxy's address**, so Phase 8 must add forwarded-header
+  handling that trusts only configured proxies, or the limits will lock everyone out together.
+- Error responses and token responses carry `Cache-Control: no-store`.
+- `refresh_tokens` rows are never deleted; expired and revoked ones need a cleanup job (open item for a later phase).
+- Tests: all 74 Phase 0 Docker-tagged tests and every Phase 1 one were run against a throwaway PostgreSQL 18.4 through
+  `PLATFORM_TEST_POSTGRES`; CI will run them on PostgreSQL 16 through Testcontainers.

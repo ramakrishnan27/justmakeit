@@ -28,6 +28,13 @@ public static class DbTestSupport
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
+    public static Task<int> InsertMemberAsync(
+        NpgsqlConnection owner, Guid agencyId, Guid userId, string role, DateTimeOffset? lastActiveAt = null) =>
+        ExecuteAsync(
+            owner,
+            "INSERT INTO agency_members (agency_id, user_id, role, last_active_at) VALUES ($1, $2, $3, $4)",
+            agencyId, userId, role, (lastActiveAt ?? DateTimeOffset.UtcNow).UtcDateTime);
+
     public static async Task<Guid> InsertWorkspaceAsync(NpgsqlConnection owner, Guid agencyId, string name = "Test workspace")
     {
         await using var command = new NpgsqlCommand("INSERT INTO workspaces (agency_id, name) VALUES ($1, $2) RETURNING id", owner)

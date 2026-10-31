@@ -63,6 +63,9 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
         context.Response.Clear();
         context.Response.StatusCode = status;
 
+        // Clear() dropped the headers an endpoint had set. An error must never be served from a cache.
+        context.Response.Headers.CacheControl = "no-store";
+
         var problem = new ProblemDetails
         {
             Status = status,

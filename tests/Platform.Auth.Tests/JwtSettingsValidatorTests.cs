@@ -86,9 +86,36 @@ public sealed class JwtSettingsValidatorTests
         Assert.True(Validator.Validate(null, settings).Failed);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(91)]
+    public void Validate_RefreshTokenLifetimeOutsideOneToNinetyDays_Fails(int days)
+    {
+        var settings = ValidSettings();
+        settings.RefreshTokenDays = days;
+
+        var result = Validator.Validate(null, settings);
+
+        Assert.True(result.Failed);
+        Assert.Contains("Jwt:RefreshTokenDays", result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(90)]
+    public void Validate_RefreshTokenLifetimeAtTheLimits_Succeeds(int days)
+    {
+        var settings = ValidSettings();
+        settings.RefreshTokenDays = days;
+
+        Assert.True(Validator.Validate(null, settings).Succeeded);
+    }
+
     [Fact]
-    public void Defaults_AreFifteenMinutes()
+    public void Defaults_AreFifteenMinutesAndThirtyDays()
     {
         Assert.Equal(15, new JwtSettings().AccessTokenMinutes);
+        Assert.Equal(30, new JwtSettings().RefreshTokenDays);
     }
 }

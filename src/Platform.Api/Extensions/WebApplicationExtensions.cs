@@ -17,6 +17,7 @@ public static class WebApplicationExtensions
         // Reading .Value runs the options validators, so a missing or short Jwt:SigningKey, or a missing
         // connection string, stops the app here with a clear message, before the database is touched.
         _ = app.Services.GetRequiredService<IOptions<JwtSettings>>().Value;
+        _ = app.Services.GetRequiredService<IOptions<AuthRateLimitSettings>>().Value;
         var database = app.Services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
 
         if (app.Environment.IsDevelopment() || database.MigrateOnStartup)

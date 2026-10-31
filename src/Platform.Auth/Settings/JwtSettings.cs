@@ -17,5 +17,8 @@ public sealed class JwtSettings
 
     public int AccessTokenMinutes { get; set; } = 15;
 
+    /// <summary>How long a refresh token (the HttpOnly cookie) stays valid. Each refresh issues a new one.</summary>
+    public int RefreshTokenDays { get; set; } = 30;
+
     public byte[] GetSigningKeyBytes() => Encoding.UTF8.GetBytes(SigningKey);
 }

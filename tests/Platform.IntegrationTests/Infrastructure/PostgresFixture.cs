@@ -7,26 +7,41 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// <summary>
 /// One PostgreSQL 16 container for the whole test run. Each test class asks it for its own database,
 /// so classes never share tables or rows. Credentials are random per run; nothing is stored.
+/// <para>
+/// Without Docker, set <see cref="ExternalServerVariable"/> to a superuser connection string for a
+/// throwaway PostgreSQL server (never one that holds real data: the migration creates the cluster-wide
+/// role app_user and the tests create and drop databases). The container is then not started.
+/// </para>
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
+    public const string ExternalServerVariable = "PLATFORM_TEST_POSTGRES";
+
     private const string OwnerUser = "platform_owner";
 
     private readonly string _ownerPassword = TokenGenerator.Create();
     private readonly string _appPassword = TokenGenerator.Create();
-    private readonly PostgreSqlContainer _container;
+    private readonly PostgreSqlContainer? _container;
+    private readonly string? _externalConnectionString = Environment.GetEnvironmentVariable(ExternalServerVariable);
 
     public PostgresFixture()
     {
+        if (!string.IsNullOrWhiteSpace(_externalConnectionString))
+        {
+            return;
+        }
+
         _container = new PostgreSqlBuilder("postgres:16-alpine")
             .WithUsername(OwnerUser)
             .WithPassword(_ownerPassword)
             .Build();
     }
 
-    public Task InitializeAsync() => _container.StartAsync();
+    private string AdminConnectionString => _externalConnectionString ?? _container!.GetConnectionString();
 
-    public Task DisposeAsync() => _container.DisposeAsync().AsTask();
+    public Task InitializeAsync() => _container?.StartAsync() ?? Task.CompletedTask;
+
+    public Task DisposeAsync() => _container?.DisposeAsync().AsTask() ?? Task.CompletedTask;
 
     /// <summary>Creates a database, applies every migration to it as the owner, and returns it.</summary>
     public async Task<TestDatabase> CreateDatabaseAsync()
@@ -41,7 +56,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         var name = "test_" + Guid.NewGuid().ToString("N");
 
-        await using (var admin = new NpgsqlConnection(_container.GetConnectionString()))
+        await using (var admin = new NpgsqlConnection(AdminConnectionString))
         {
             await admin.OpenAsync();
             // DDL cannot take bind parameters. The name is generated above, never user input.
@@ -49,10 +64,10 @@ public sealed class PostgresFixture : IAsyncLifetime
             await create.ExecuteNonQueryAsync();
         }
 
-        var owner = new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = name };
+        var owner = new NpgsqlConnectionStringBuilder(AdminConnectionString) { Database = name };
         var app = new NpgsqlConnectionStringBuilder(owner.ConnectionString) { Username = "app_user", Password = _appPassword };
 
-        return new TestDatabase(name, _container.GetConnectionString(), owner.ConnectionString, app.ConnectionString);
+        return new TestDatabase(name, AdminConnectionString, owner.ConnectionString, app.ConnectionString);
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Platform.Helpers.Constants;
 using Platform.IntegrationTests.Infrastructure;
 
 namespace Platform.IntegrationTests.Api;
@@ -171,10 +172,22 @@ public sealed class HealthAndHostingTests
     }
 
     [Fact]
-    public async Task UnknownRoutes_Return404()
+    public async Task UnknownRoutes_AreClosedToAnonymousCallers()
+    {
+        // The authorization fallback policy applies to every request, so without a token even a route
+        // that does not exist answers 401 and reveals nothing about which routes exist.
+        using var factory = new ApiHostFactory(ApiHostFactory.ValidSettings());
+        using var client = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/does-not-exist")).StatusCode);
+    }
+
+    [Fact]
+    public async Task UnknownRoutes_Return404_ForASignedInUser()
     {
         using var factory = new ApiHostFactory(ApiHostFactory.ValidSettings());
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), AgencyRole.Viewer));
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/v1/does-not-exist")).StatusCode);
     }
@@ -185,7 +198,10 @@ public sealed class HealthAndHostingTests
         using var factory = new ApiHostFactory(ApiHostFactory.ValidSettings());
         using var client = factory.CreateClient();
 
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/swagger/v1/swagger.json")).StatusCode);
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("openapi", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

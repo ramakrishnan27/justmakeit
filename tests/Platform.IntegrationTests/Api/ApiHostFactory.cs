@@ -1,6 +1,10 @@
+using System.Net;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Platform.Helpers.Constants;
 using Platform.Helpers.Utilities;
 
 namespace Platform.IntegrationTests.Api;
@@ -25,9 +29,37 @@ public sealed class ApiHostFactory(IReadOnlyDictionary<string, string?> settings
         ["Cors:WebOrigin"] = ""
     };
 
+    /// <summary>An access token for the given user, agency and role, signed with this host's key.</summary>
+    public string CreateAccessToken(Guid userId, Guid agencyId, AgencyRole role) =>
+        TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
+        builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, RemoteIpFromHeaderStartupFilter>());
+    }
+
+    /// <summary>
+    /// The in-memory test server has no client address. A test sets one with the
+    /// <see cref="RemoteIpHeader"/> header, so per-address behaviour such as rate limiting can be tested.
+    /// </summary>
+    public const string RemoteIpHeader = "X-Test-Remote-Ip";
+
+    private sealed class RemoteIpFromHeaderStartupFilter : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, nextMiddleware) =>
+            {
+                if (context.Request.Headers.TryGetValue(RemoteIpHeader, out var value) && IPAddress.TryParse(value, out var address))
+                {
+                    context.Connection.RemoteIpAddress = address;
+                }
+
+                return nextMiddleware();
+            });
+            next(app);
+        };
     }
 }
