@@ -8,7 +8,7 @@ exist as empty stubs so they can be added later as their own projects.
 
 | Layer | Choice |
 |---|---|
-| Backend | .NET 8, ASP.NET Core Web API, C# 12, nullable on (nullable warnings are errors) |
+| Backend | .NET 10, ASP.NET Core Web API, C# 14, nullable on (nullable warnings are errors) |
 | Database | PostgreSQL 16 only. No other database, **no EF Core** |
 | Data access | Dapper over Npgsql, plain SQL in repository classes |
 | Frontend | Vanilla JavaScript (ES modules, Web Components), HTML, CSS. No framework, no jQuery, no CSS framework, no build step |
@@ -52,8 +52,6 @@ docker compose up -d                                   # local PostgreSQL 16 (co
 dotnet run --project src/Platform.Api                  # http://localhost:5080, Development, applies migrations
 node --test web/tests                                  # frontend unit tests (from Phase 6)
 ```
-
-If only a newer .NET runtime is installed, run with `DOTNET_ROLL_FORWARD=Major` (the projects target net8.0).
 
 ### Secrets (never committed)
 
@@ -146,5 +144,9 @@ or was skipped, and any open question.
   need `[Authorize]`. Token issuing arrives in Phase 1.
 - `Platform.Helpers.Tests` was added (the brief lists three test projects) so helper rules have unit tests.
 - Docker Compose publishes PostgreSQL on host port **5433** by default, because 5432 is often taken locally.
-- Target framework is net8.0 as specified. .NET 8 leaves support on 10 Nov 2026; retargeting to net10.0 is a one-line
-  change in `Directory.Build.props` plus package versions.
+- Target framework was net8.0 as specified; retargeted to **net10.0** right after Phase 0 at the user's request (.NET 8
+  leaves support on 10 Nov 2026). `global.json` pins SDK 10.0.100 (rolls forward to the latest feature band), the
+  `LangVersion` pin to 12 was dropped (C# 14 is the default), JwtBearer and Mvc.Testing moved to 10.0.14, and
+  Testcontainers.PostgreSql to 4.16.0 (4.10.0 pulled in SSH.NET 2025.1.0, which has known high-severity advisories).
+  Npgsql stays on 8.0.9 and Swashbuckle on 7.3.2 (10.x changes the OpenApi model): both run on net10, and bumping them
+  waits until the Docker tests can run here.
