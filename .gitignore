@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+TestResults/
+*.log
+
+# Secrets and local environment
+.env
+appsettings.*.local.json
+secrets.json
+
+# Node (frontend unit tests)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

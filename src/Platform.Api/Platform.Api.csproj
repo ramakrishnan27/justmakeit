@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>platform-api-7d3c1f0e-6a52-4c1b-9b1e-2f4e8f0c9a11</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Platform.Auth\Platform.Auth.csproj" />
+    <ProjectReference Include="..\Platform.Email\Platform.Email.csproj" />
+    <ProjectReference Include="..\Platform.Facebook\Platform.Facebook.csproj" />
+    <ProjectReference Include="..\Platform.Helpers\Platform.Helpers.csproj" />
+    <ProjectReference Include="..\Platform.Infrastructure\Platform.Infrastructure.csproj" />
+    <ProjectReference Include="..\Platform.Instagram\Platform.Instagram.csproj" />
+    <ProjectReference Include="..\Platform.Sms\Platform.Sms.csproj" />
+    <ProjectReference Include="..\Platform.WhatsApp\Platform.WhatsApp.csproj" />
+    <ProjectReference Include="..\Platform.YouTube\Platform.YouTube.csproj" />
+  </ItemGroup>
+
+</Project>
