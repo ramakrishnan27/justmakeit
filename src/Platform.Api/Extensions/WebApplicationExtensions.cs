@@ -9,6 +9,9 @@ namespace Platform.Api.Extensions;
 
 public static class WebApplicationExtensions
 {
+    /// <summary>The addresses of the member app (sign in, create an account, dashboard). The site admin app lives under /admin.</summary>
+    private static readonly string[] MemberAppPages = ["login", "register", "dashboard"];
+
     /// <summary>
     /// Runs before the first request: stops the app on invalid configuration, then applies migrations
     /// in Development (or wherever <c>Database:MigrateOnStartup</c> is true).
@@ -20,6 +23,7 @@ public static class WebApplicationExtensions
         _ = app.Services.GetRequiredService<IOptions<JwtSettings>>().Value;
         _ = app.Services.GetRequiredService<IOptions<AuthRateLimitSettings>>().Value;
         _ = app.Services.GetRequiredService<IOptions<SiteAdminSettings>>().Value;
+        _ = app.Services.GetRequiredService<IOptions<GoogleSettings>>().Value;
         var database = app.Services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
 
         if (app.Environment.IsDevelopment() || database.MigrateOnStartup)
@@ -33,9 +37,9 @@ public static class WebApplicationExtensions
     }
 
     /// <summary>
-    /// Lets a browser open or reload a client-side route such as /admin/login: those paths answer with the
-    /// app shell (<c>index.html</c>) instead of 404. Only /admin is covered, so a mistyped /v1 route
-    /// still gets a real 404 from the API.
+    /// Lets a browser open or reload a client-side route such as /admin/login or /login: those paths answer
+    /// with the app shell (<c>index.html</c>) instead of 404. Only the app addresses are covered (/admin and
+    /// the member app: /login, /register, /dashboard), so a mistyped /v1 route still gets a real 404 from the API.
     /// </summary>
     public static IEndpointRouteBuilder MapPlatformWebFallback(this WebApplication app)
     {
@@ -50,6 +54,11 @@ public static class WebApplicationExtensions
         // The authorization fallback policy would otherwise close these to a visitor who is not signed in yet.
         app.MapFallbackToFile("admin", "index.html", options).AllowAnonymous();
         app.MapFallbackToFile("admin/{*path}", "index.html", options).AllowAnonymous();
+        foreach (var page in MemberAppPages)
+        {
+            app.MapFallbackToFile(page, "index.html", options).AllowAnonymous();
+        }
+
         return app;
     }
 

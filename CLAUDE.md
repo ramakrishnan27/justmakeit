@@ -32,7 +32,7 @@ JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.exa
 src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
         Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
-web/    vanilla JavaScript frontend: site admin login and dashboard so far (see Decisions log); more in Phases 6-7
+web/    vanilla JavaScript frontend: site admin app, and the member app (sign in, create an account, role dashboard); more in Phases 6-7
 ```
 
 Feature projects (Auth, Email, each channel) share one layout: `Controllers/ DTOs/ Models/ Interfaces/ Services/
@@ -86,6 +86,18 @@ dotnet user-secrets --project src/Platform.Api set "SiteAdmin:Password" "<12 to 
 
 Then sign in at `/admin` (http://localhost:5080/admin).
 
+To offer **Continue with Google** on the member pages (optional; without these the button is not shown and email and password
+still work), create an OAuth client of type "Web application" in Google Cloud Console (APIs and Services, Credentials), add the
+authorized redirect URI `http://localhost:5080/v1/auth/google/callback` (and your real address later), then:
+
+```
+dotnet user-secrets --project src/Platform.Api set "Google:ClientId" "<id>.apps.googleusercontent.com"
+dotnet user-secrets --project src/Platform.Api set "Google:ClientSecret" "<client secret>"
+```
+
+Set both or neither: the API refuses to start with only one. `Google:RedirectUri` is optional and defaults to the address of
+the request; set it when the API runs behind a proxy, so it matches Google Cloud Console exactly.
+
 `PLATFORM_TEST_POSTGRES` must name a server that holds no real data: the migration creates the cluster-wide role
 `app_user` and the tests create and drop databases. Without Docker, `initdb`/`pg_ctl` from any local PostgreSQL install can
 start a private cluster on a spare port for this.
@@ -98,8 +110,8 @@ migrator sets that role's password from this string, so it is configured in one 
 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
-  `001_init.sql`, `002_site_admin.sql` and `003_business_models.sql` are released: do not change them. Phase 2 writes
-  `004_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
+  `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql` and `004_external_identities.sql` are released: do not
+  change them. Phase 2 writes `005_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
   example the return type of a function that `CREATE OR REPLACE` makes again): add a new function instead.
 - The API connects as `app_user` (not superuser, no BYPASSRLS, never to be given either). `NpgsqlConnectionFactory`
   sets `app.agency_id` and `app.user_id` on every connection it opens; `app_agency_id()` / `app_user_id()` read them and
@@ -142,11 +154,11 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `004_email.sql` (was 002; `002_site_admin.sql` and `003_business_models.sql` took those numbers), senders, contacts, lists, suppressions, CSV import |
+| 2 | `005_email.sql` (was 002; the site admin, business model and Google sign-in scripts took 002 to 004), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); the rest (workspace switcher, agency login and register, PWA) is still to do |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; the rest (workspace switcher, invitations, PWA) is still to do |
 | 7 | Frontend email screens |
 | 8 | CI, README, seed data, security review |
 
@@ -250,7 +262,7 @@ or was skipped, and any open question.
   rules, and "tokens only in memory", are enforced by `web/tests/rules.test.js`. The access token lives only in the page;
   a reload restores the session from the cookie.
 - Migration numbering: this took `002`, so Phase 2's email script moved to `003_email.sql`; business models then took
-  `003` and it is now `004_email.sql`.
+  `003` and then Google sign-in took `004`, so it is now `005_email.sql`.
 - Verified in a real browser (headless Edge over the DevTools protocol, throwaway profile): redirect to sign-in, wrong
   password message, dashboard at 360 px and 1280 px, paging, reload restores the session, sign out, not-found page, nothing
   in local/session storage, no horizontal scroll, no script errors (the only console entries are the expected 401s).
@@ -296,3 +308,45 @@ or was skipped, and any open question.
   Nothing was deployed, and the development database had no organizations.
 - Open: no endpoint adds or removes members yet, so "the last organizationadmin cannot be removed" is a rule for when they
   are built. A creator will need a way to connect their own accounts later; `CanManage` is admin-only, so that needs its own policy.
+
+**Member app: sign-in, sign-up and a dashboard for each role (requested by the user; the second early slice of Phase 6)**
+- Addresses: `/login`, `/register`, `/dashboard` (the site admin app stays under `/admin`). `MapPlatformWebFallback` answers
+  those exact addresses with the shell, so a reload works; nothing else falls back. `main.js` starts the app that belongs to
+  the address (`appForPath`). The two apps have their own routes, session (`memberEndpoints` or `siteAdminEndpoints`) and
+  refresh cookie, and share the api client, the router and the styles.
+- Sign-up: pick the kind of organization (company, marketing agency, individual creator), give its name, then choose
+  **Continue with Google** or **email and password**; the email fields appear only when email is chosen. Google is offered
+  only when the server has it set up (`GET /v1/auth/providers` answers `{google: bool}`), so no button leads nowhere.
+- **Google is a server-side redirect flow with PKCE** (chosen by the user over Google's own script, because the page's content
+  security policy allows scripts from this origin only and stays unchanged). `GET /v1/auth/google/start` makes a random
+  `state`, `nonce` and PKCE verifier and keeps them, with the intent, business model and organization name, in the encrypted
+  `google_oauth` cookie (ASP.NET Core Data Protection; HttpOnly, Secure, **SameSite=Lax** because Google returns the browser
+  with a top-level GET from another site; Path=/v1/auth/google; 10 minutes), then redirects to Google.
+  `GET /v1/auth/google/callback` first checks the cookie's state against the address, so a callback this browser did not
+  start is refused before Google is asked anything. It trades the code for an ID token over the back channel with the client
+  secret and the verifier, and checks the token: signature against Google's published keys (RS256 only), issuer, audience,
+  expiry, our nonce, a subject and an email. Then it signs the person in (refresh cookie, redirect to `/dashboard`) or
+  redirects back to the form with `?error=<code>`. No token or code is ever in an address we send on, the callback answers
+  `Referrer-Policy: no-referrer`, nothing secret is logged, and the client secret never leaves the server. Start and callback
+  share the credentials rate limit. With several instances the data-protection key ring must be shared (Phase 8).
+- **An existing email is never linked to Google** (chosen by the user). Password sign-ups are not email-verified, so linking by
+  address would let whoever registered it first keep access. A Google sign-in whose verified email already has an account is
+  refused with `google_email_taken`, from either form; a login with no account gets `google_no_account`; an unverified Google
+  email is refused. A known Google user who uses the register form is simply signed in.
+- `004_external_identities.sql` (approved with the choice above): `users.password_hash` may be empty; the new `user_identities`
+  (provider, subject, email) has unique `(provider, subject)` and one identity per user per provider, RLS enabled and forced,
+  and `app_user` may only SELECT and INSERT, only for the user it is acting as. `auth_find_user_by_identity()` is the narrow
+  definer lookup before any user is known (with an `owner_lookup` policy, so it works for a non-superuser owner; tested).
+  "Every user has a password or an identity" spans two tables, so it is a **deferred constraint trigger** `ck_users_credential`
+  checked at commit, not a CHECK. It runs when a user is created or their password is cleared, not when an identity is
+  deleted (nothing deletes one). A person with no password gets the same 401 as a wrong password at password login, and
+  `UserLoginRecord.PasswordHash` is nullable so that path cannot be skipped.
+- Dashboard: one page that changes with the person's role in their kind of organization. It shows the organization and its
+  model, the role and what it is responsible for (the user's own wording per model and role, in `web/js/core/roles.js`), what
+  the role may do (mirrors the server's policies; the server still decides), the workspaces (client workspaces in an agency;
+  an organization admin of a company or agency can add one, a creator has the one made at sign-up), what is still to come for
+  that role (labelled "Coming soon": none of it exists), and the token's user id and role.
+- Not built: inviting people into an organization (so in practice only the founder of a company or agency exists; the other
+  roles can be tried only by inserting members in the database), an organization switcher for people in several
+  organizations, linking Google to an existing account (needs email verification first), changing a password, and the real
+  Google round trip, which needs your own Google credentials and was checked here only against a stand-in for Google.

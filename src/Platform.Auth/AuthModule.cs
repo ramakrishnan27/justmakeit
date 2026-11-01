@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Platform.Auth.Interfaces;
 using Platform.Auth.Repositories;
 using Platform.Auth.Services;
+using Platform.Auth.Services.Google;
 using Platform.Auth.Settings;
 
 namespace Platform.Auth;
@@ -44,6 +45,16 @@ public static class AuthModule
         services.AddScoped<ISiteAdminAuthService, SiteAdminAuthService>();
         services.AddScoped<ISiteAdminDashboardService, SiteAdminDashboardService>();
         services.AddSingleton<ISiteAdminBootstrapper, SiteAdminBootstrapper>();
+
+        // Continue with Google: off until Google:ClientId and Google:ClientSecret are set.
+        services.AddOptions<GoogleSettings>().BindConfiguration(GoogleSettings.SectionName);
+        services.AddSingleton<IValidateOptions<GoogleSettings>, GoogleSettingsValidator>();
+        services.AddDataProtection();
+        services.AddSingleton<IGoogleOAuthStateProtector, GoogleOAuthStateProtector>();
+        services.AddSingleton<IGoogleSigningKeys, GoogleSigningKeys>();
+        services.AddSingleton<GoogleIdTokenValidator>();
+        services.AddHttpClient<IGoogleOAuthClient, GoogleOAuthClient>(client => client.Timeout = TimeSpan.FromSeconds(10));
+        services.AddScoped<IGoogleSignInService, GoogleSignInService>();
 
         // Makes this assembly's controllers part of the app without relying on assembly scanning.
         services.AddControllers().AddApplicationPart(typeof(AuthModule).Assembly);

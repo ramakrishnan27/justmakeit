@@ -200,6 +200,108 @@ public sealed class AccountRepositoryTests(PostgresFixture postgres) : IAsyncLif
         Assert.Equal(0, await asSecond.ExecuteScalarAsync<long>("SELECT count(*) FROM workspaces WHERE agency_id = @id", new { id = first.AgencyId }));
     }
 
+    // --- Accounts that sign in with Google -----------------------------------------------------
+
+    private static NewAccount GoogleAccount(
+        string email = "maya@gmail.com", string subject = "sub-maya", BusinessModel model = BusinessModel.Creator) =>
+        Account(email, "Maya Makes Videos", model: model) with
+        {
+            PasswordHash = null,
+            FullName = "Maya Rao",
+            Identity = new ExternalIdentity("google", subject, email)
+        };
+
+    [Fact]
+    public async Task CreateAccount_ForAGoogleUser_StoresNoPassword_TheIdentity_AndEverythingElseAsUsual()
+    {
+        var account = GoogleAccount();
+
+        Assert.True(await _repository.CreateAccountAsync(account, CancellationToken.None));
+
+        await using var owner = await _db.OpenOwnerAsync();
+        Assert.Null(await owner.ExecuteScalarAsync<string?>("SELECT password_hash FROM users WHERE id = @id", new { id = account.UserId }));
+        Assert.Equal(("google", "sub-maya", "maya@gmail.com"), await owner.QuerySingleAsync<(string, string, string)>(
+            "SELECT provider, subject, email FROM user_identities WHERE user_id = @id", new { id = account.UserId }));
+        Assert.Equal("contentwriter", await owner.QuerySingleAsync<string>(
+            "SELECT role FROM agency_members WHERE user_id = @id", new { id = account.UserId }));
+        Assert.Equal(1, await CountAsync("workspaces"));
+    }
+
+    [Fact]
+    public async Task CreateAccount_WithNeitherAPasswordNorAnIdentity_IsRefusedWhenItCommits_AndLeavesNothing()
+    {
+        var nobody = Account() with { PasswordHash = null, Identity = null };
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(() => _repository.CreateAccountAsync(nobody, CancellationToken.None));
+
+        Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+        Assert.Equal("ck_users_credential", exception.ConstraintName);
+        Assert.Equal(0, await CountAsync("users"));
+        Assert.Equal(0, await CountAsync("agencies"));
+    }
+
+    [Fact]
+    public async Task CreateAccount_TheSameGoogleAccountTwice_ReturnsFalse_AndCreatesNothingNew()
+    {
+        Assert.True(await _repository.CreateAccountAsync(GoogleAccount("first@gmail.com", "same-subject"), CancellationToken.None));
+
+        Assert.False(await _repository.CreateAccountAsync(GoogleAccount("second@gmail.com", "same-subject"), CancellationToken.None));
+
+        Assert.Equal(1, await CountAsync("users"));
+        Assert.Equal(1, await CountAsync("agencies"));
+        Assert.Equal(1, await CountAsync("user_identities"));
+    }
+
+    [Fact]
+    public async Task CreateAccount_ForAGoogleUserWhoseEmailIsTaken_ReturnsFalse_AndLeavesNoIdentityBehind()
+    {
+        await _repository.CreateAccountAsync(Account("maya@gmail.com"), CancellationToken.None);
+
+        Assert.False(await _repository.CreateAccountAsync(GoogleAccount("MAYA@gmail.com"), CancellationToken.None));
+
+        Assert.Equal(0, await CountAsync("user_identities"));
+        Assert.Equal(1, await CountAsync("users"));
+    }
+
+    [Fact]
+    public async Task FindUserIdByIdentity_FindsTheUser_WithoutAnyTenant()
+    {
+        var account = GoogleAccount();
+        await _repository.CreateAccountAsync(account, CancellationToken.None);
+
+        Assert.Equal(account.UserId, await _repository.FindUserIdByIdentityAsync("google", "sub-maya", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("google", "someone-else")]
+    [InlineData("google", "")]
+    [InlineData("google", "%")]
+    [InlineData("google", "sub-maya%")]
+    [InlineData("google", "sub-maya' OR '1'='1")]
+    [InlineData("facebook", "sub-maya")]
+    [InlineData("Google", "sub-maya")]
+    [InlineData("", "")]
+    public async Task FindUserIdByIdentity_MatchesOnlyTheExactProviderAndSubject_NeverAPatternOrInjectedSql(string provider, string subject)
+    {
+        await _repository.CreateAccountAsync(GoogleAccount(), CancellationToken.None);
+        await _repository.CreateAccountAsync(GoogleAccount("other@gmail.com", "sub-other"), CancellationToken.None);
+
+        Assert.Null(await _repository.FindUserIdByIdentityAsync(provider, subject, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FindLogin_ForAGoogleUser_ReturnsThemWithNoPasswordHash()
+    {
+        var account = GoogleAccount();
+        await _repository.CreateAccountAsync(account, CancellationToken.None);
+
+        var found = await _repository.FindLoginByEmailAsync("maya@gmail.com", CancellationToken.None);
+
+        Assert.NotNull(found);
+        Assert.Equal(account.UserId, found.Id);
+        Assert.Null(found.PasswordHash);
+    }
+
     // --- FindLoginByEmailAsync ---------------------------------------------------------------
 
     [Fact]

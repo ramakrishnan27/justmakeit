@@ -107,7 +107,7 @@ public sealed class AuthServiceTests
         Assert.Equal("Acme Agency", created.AgencyName);
         Assert.NotEqual(Password, created.PasswordHash);
         Assert.DoesNotContain(Password, created.PasswordHash);
-        Assert.True(_hasher.Verify(Password, created.PasswordHash));
+        Assert.True(_hasher.Verify(Password, created.PasswordHash!));
         Assert.NotEqual(Guid.Empty, created.UserId);
         Assert.NotEqual(Guid.Empty, created.AgencyId);
         Assert.NotEqual(created.UserId, created.AgencyId);
@@ -700,5 +700,119 @@ public sealed class AuthServiceTests
     public async Task GetMe_WithoutASignedInUser_IsUnauthorized()
     {
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.GetMeAsync(CancellationToken.None));
+    }
+
+    // --- A person who signed up with Google has no password -----------------------------------
+
+    [Theory]
+    [InlineData("a long enough password")]
+    [InlineData("")]
+    [InlineData("pbkdf2")]
+    [InlineData("anything at all")]
+    public async Task Login_ForAPersonWithNoPassword_IsTheSame401AsAWrongPassword_WhateverIsTyped(string typed)
+    {
+        GivenUser(new UserLoginRecord { Id = _userId, Email = "maya@gmail.com", FullName = "Maya", PasswordHash = null });
+        GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin));
+
+        var exception = await AssertThrowsAsync<UnauthorizedException>(
+            () => _service.LoginAsync(new LoginRequest("maya@gmail.com", typed.Length == 0 ? "x" : typed, null), CancellationToken.None));
+
+        Assert.Equal("invalid_credentials", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+    }
+
+    // --- RegisterExternal --------------------------------------------------------------------
+
+    private static ExternalRegistration GoogleRegistration(BusinessModel model = BusinessModel.Agency, string? organization = " Bright Ideas ") =>
+        new("google", "sub-maya", " Maya.Rao@Gmail.com ", " Maya Rao ", organization, model);
+
+    [Theory]
+    [InlineData(BusinessModel.Company, OrganizationRole.OrganizationAdmin)]
+    [InlineData(BusinessModel.Agency, OrganizationRole.OrganizationAdmin)]
+    [InlineData(BusinessModel.Creator, OrganizationRole.ContentWriter)]
+    public async Task RegisterExternal_CreatesTheOrganization_WithNoPassword_AndTheGoogleIdentity(BusinessModel model, OrganizationRole founderRole)
+    {
+        NewAccount? created = null;
+        _accounts.CreateAccountAsync(Arg.Do<NewAccount>(account => created = account), Arg.Any<CancellationToken>()).Returns(true);
+
+        await _service.RegisterExternalAsync(GoogleRegistration(model), CancellationToken.None);
+
+        Assert.NotNull(created);
+        Assert.Null(created.PasswordHash);
+        Assert.Equal("maya.rao@gmail.com", created.Email);
+        Assert.Equal("Maya Rao", created.FullName);
+        Assert.Equal("Bright Ideas", created.AgencyName);
+        Assert.Equal(model, created.BusinessModel);
+        Assert.Equal(founderRole, created.Role);
+        Assert.Equal(AuthService.DefaultWorkspaceName, created.WorkspaceName);
+        Assert.Equal(new ExternalIdentity("google", "sub-maya", "maya.rao@gmail.com"), created.Identity);
+    }
+
+    [Fact]
+    public async Task RegisterExternal_SignsTheFounderIn_WithTheFounderRoleToken_AndOnlyTheHashOfTheRefreshToken()
+    {
+        NewAccount? created = null;
+        NewRefreshToken? stored = null;
+        _accounts.CreateAccountAsync(Arg.Do<NewAccount>(account => created = account), Arg.Any<CancellationToken>()).Returns(true);
+        await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
+
+        var result = await _service.RegisterExternalAsync(GoogleRegistration(BusinessModel.Creator), CancellationToken.None);
+
+        _accessTokens.Received(1).Issue(created!.UserId, created.AgencyId, OrganizationRole.ContentWriter);
+        Assert.Equal("access-token", result.Tokens.AccessToken);
+        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored!.TokenHash);
+        Assert.NotEqual(result.RefreshToken, stored.TokenHash);
+    }
+
+    [Fact]
+    public async Task RegisterExternal_WithATakenEmail_IsAConflict_AndSignsNobodyIn()
+    {
+        _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(false);
+
+        var exception = await AssertThrowsAsync<ConflictException>(() => _service.RegisterExternalAsync(GoogleRegistration(), CancellationToken.None));
+
+        Assert.Equal("email_taken", exception.Code);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+    }
+
+    [Theory]
+    [InlineData("not an email", "Acme", "sub", "email")]
+    [InlineData("maya@gmail.com", "", "sub", "organizationName")]
+    [InlineData("maya@gmail.com", "   ", "sub", "organizationName")]
+    [InlineData("maya@gmail.com", "Acme", "", "subject")]
+    public async Task RegisterExternal_ChecksTheRulesAgain_AndCreatesNothing(string email, string organization, string subject, string field)
+    {
+        var registration = new ExternalRegistration("google", subject, email, "Maya", organization, BusinessModel.Company);
+
+        var exception = await AssertThrowsAsync<BadRequestException>(() => _service.RegisterExternalAsync(registration, CancellationToken.None));
+
+        Assert.Contains(field, exception.Errors!.Keys);
+        await _accounts.DidNotReceiveWithAnyArgs().CreateAccountAsync(default!, default);
+    }
+
+    // --- LoginExternal -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task LoginExternal_UsesTheMostRecentMembership_AndTouchesIt()
+    {
+        var recent = Guid.NewGuid();
+        GivenMemberships(Membership(recent, OrganizationRole.MarketingManager), Membership(_agencyId, OrganizationRole.OrganizationAdmin));
+
+        await _service.LoginExternalAsync(_userId, CancellationToken.None);
+
+        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager);
+        await _memberships.Received(1).TouchAsync(recent, _userId, _time.Now, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LoginExternal_ForAUserWithNoOrganization_IsForbidden()
+    {
+        GivenMemberships();
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() => _service.LoginExternalAsync(_userId, CancellationToken.None));
+
+        Assert.Equal("no_agency", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
     }
 }

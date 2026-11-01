@@ -1,20 +1,27 @@
-// Starts the site admin app: restores the session from the refresh cookie, then lets the router show
-// the sign-in page or the dashboard. The token lives only in memory (see core/api.js).
+// Starts the app for the address: the site admin app under /admin, the member app (sign in, create an account,
+// dashboard) everywhere else. Each restores its own session from its own refresh cookie, then lets the router
+// show the sign-in page or the dashboard. The token lives only in memory (see core/api.js).
 
 import { createApiClient } from './core/api.js';
 import { h } from './core/dom.js';
-import { createRouter, homePath } from './core/router.js';
-import { createSession } from './core/session.js';
+import { adminApp, appForPath, createRouter } from './core/router.js';
+import { createSession, memberEndpoints } from './core/session.js';
 import './pages/admin-dashboard.js';
 import './pages/admin-login.js';
+import './pages/member-dashboard.js';
+import './pages/member-login.js';
+import './pages/member-register.js';
 
-const app = document.getElementById('app');
-const api = createApiClient();
-const session = createSession(api);
+const app = appForPath(window.location.pathname);
+const isAdmin = app === adminApp;
+
+const root = document.getElementById('app');
+const api = createApiClient({ refreshPath: isAdmin ? '/v1/site/refresh' : '/v1/auth/refresh' });
+const session = isAdmin ? createSession(api) : createSession(api, memberEndpoints);
 
 function show(element, title) {
-  app.replaceChildren(element);
-  document.title = `${title} · Site admin`;
+  root.replaceChildren(element);
+  document.title = `${title} · ${app.label}`;
   // Move focus to the page heading, so a screen reader announces where the user has arrived.
   element.querySelector('h1')?.focus();
 }
@@ -30,7 +37,7 @@ function render(decision) {
           { class: 'card auth-card' },
           h('h1', { tabindex: '-1' }, 'Page not found'),
           h('p', { class: 'muted' }, 'There is nothing at this address.'),
-          h('a', { class: 'button button-primary button-block', href: homePath, 'data-link': true }, 'Go to the dashboard'),
+          h('a', { class: 'button button-primary button-block', href: app.homePath, 'data-link': true }, 'Go to the dashboard'),
         ),
       ),
       'Not found',
@@ -43,7 +50,13 @@ function render(decision) {
   show(element, decision.route.title);
 }
 
-const router = createRouter({ win: window, session, render });
+// The session is settled first, and only then is the router made. A router made earlier would see the status
+// change from unknown to signed in or out, and render the page once before router.start() rendered it again:
+// a page that reads a one-time value from the address (the error a failed Google sign-in leaves) would lose it
+// on the second render.
+await session.restore();
+
+const router = createRouter({ win: window, session, render, app });
 
 // Links marked data-link move around without reloading the page.
 document.addEventListener('click', (event) => {
@@ -54,5 +67,4 @@ document.addEventListener('click', (event) => {
   }
 });
 
-await session.restore();
 router.start();

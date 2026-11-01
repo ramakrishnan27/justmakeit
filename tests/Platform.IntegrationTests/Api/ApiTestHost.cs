@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Platform.IntegrationTests.Infrastructure;
 
 namespace Platform.IntegrationTests.Api;
@@ -28,7 +29,9 @@ public sealed class ApiTestHost : IAsyncDisposable
     {
         Factory = factory;
         _database = database;
-        Client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        // No cookies and no redirects: a test reads Set-Cookie and Location itself, and a redirect to Google or to
+        // a page of the app must be seen, not followed.
+        Client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
     }
 
     public ApiHostFactory Factory { get; }
@@ -39,7 +42,9 @@ public sealed class ApiTestHost : IAsyncDisposable
 
     /// <summary>A host over a fresh, migrated database. The API connects as app_user, as it does in production.</summary>
     public static async Task<ApiTestHost> StartWithDatabaseAsync(
-        PostgresFixture postgres, Action<Dictionary<string, string?>, TestDatabase>? configure = null)
+        PostgresFixture postgres,
+        Action<Dictionary<string, string?>, TestDatabase>? configure = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var database = await postgres.CreateDatabaseAsync();
         var settings = ApiHostFactory.ValidSettings();
@@ -47,15 +52,16 @@ public sealed class ApiTestHost : IAsyncDisposable
         settings["RateLimiting:Auth:CredentialRequestsPerWindow"] = "100000";
         settings["RateLimiting:Auth:SessionRequestsPerWindow"] = "100000";
         configure?.Invoke(settings, database);
-        return new ApiTestHost(new ApiHostFactory(settings), database);
+        return new ApiTestHost(new ApiHostFactory(settings, configureServices: configureServices), database);
     }
 
     /// <summary>A host that cannot reach any database: for rules that are decided before a query runs.</summary>
-    public static ApiTestHost StartWithoutDatabase(Action<Dictionary<string, string?>>? configure = null)
+    public static ApiTestHost StartWithoutDatabase(
+        Action<Dictionary<string, string?>>? configure = null, Action<IServiceCollection>? configureServices = null)
     {
         var settings = ApiHostFactory.ValidSettings();
         configure?.Invoke(settings);
-        return new ApiTestHost(new ApiHostFactory(settings), null);
+        return new ApiTestHost(new ApiHostFactory(settings, configureServices: configureServices), null);
     }
 
     public async ValueTask DisposeAsync()
@@ -169,12 +175,14 @@ public sealed class ApiTestHost : IAsyncDisposable
     /// <summary>The site admin refresh token value the response put in its cookie, or null when there is none.</summary>
     public static string? SiteCookieValue(HttpResponseMessage response) => CookieValue(response, SiteCookieName);
 
-    private static string? CookieHeader(HttpResponseMessage response, string name) =>
+    /// <summary>The raw Set-Cookie header for any cookie by name, or null when the response sets none.</summary>
+    public static string? CookieHeader(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues("Set-Cookie", out var values)
             ? values.FirstOrDefault(value => value.StartsWith(name + "=", StringComparison.Ordinal))
             : null;
 
-    private static string? CookieValue(HttpResponseMessage response, string name)
+    /// <summary>The value of any cookie the response sets, or null when there is none or it was cleared.</summary>
+    public static string? CookieValue(HttpResponseMessage response, string name)
     {
         var header = CookieHeader(response, name);
         if (header is null)

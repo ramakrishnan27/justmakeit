@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createRouter, homePath, loginPath, matchRoute, normalizePath, resolveNavigation, routes } from '../js/core/router.js';
+import {
+  adminApp,
+  appForPath,
+  createRouter,
+  homePath,
+  loginPath,
+  matchRoute,
+  memberApp,
+  normalizePath,
+  resolveNavigation,
+  routes,
+} from '../js/core/router.js';
 
 describe('normalizePath', () => {
   it('drops trailing slashes but keeps the root', () => {
@@ -198,5 +209,120 @@ describe('createRouter', () => {
 
     assert.equal(rendered.length, 1);
     assert.equal(rendered[0].route.name, 'login');
+  });
+});
+
+describe('the member app', () => {
+  const decide = (pathname, status) => resolveNavigation({ pathname, status, app: memberApp });
+
+  it('has a dashboard behind sign-in, and a sign-in and a sign-up page for visitors', () => {
+    assert.deepEqual(
+      memberApp.routes.filter((route) => route.requiresAuth).map((route) => route.name),
+      ['dashboard'],
+    );
+    assert.deepEqual(
+      memberApp.routes.filter((route) => !route.requiresAuth).map((route) => route.name),
+      ['login', 'register'],
+    );
+    assert.deepEqual(
+      memberApp.routes.map((route) => route.path),
+      ['/dashboard', '/login', '/register'],
+    );
+  });
+
+  it('sends the root to the dashboard, which sends a visitor on to sign in', () => {
+    assert.deepEqual(decide('/', 'signedIn'), { type: 'redirect', to: '/dashboard' });
+    assert.deepEqual(decide('/dashboard', 'signedOut'), { type: 'redirect', to: '/login' });
+    assert.deepEqual(decide('/dashboard', 'unknown'), { type: 'redirect', to: '/login' });
+  });
+
+  it('shows the dashboard to a signed-in user', () => {
+    const decision = decide('/dashboard', 'signedIn');
+    assert.equal(decision.type, 'render');
+    assert.equal(decision.route.element, 'member-dashboard');
+  });
+
+  it('shows sign-in and sign-up to a visitor', () => {
+    for (const status of ['signedOut', 'unknown']) {
+      assert.equal(decide('/login', status).route.element, 'member-login');
+      assert.equal(decide('/register', status).route.element, 'member-register');
+    }
+  });
+
+  it('sends a signed-in user away from both the sign-in and the sign-up page', () => {
+    assert.deepEqual(decide('/login', 'signedIn'), { type: 'redirect', to: '/dashboard' });
+    assert.deepEqual(decide('/register', 'signedIn'), { type: 'redirect', to: '/dashboard' });
+  });
+
+  it('does not know the site admin addresses, and the admin app does not know these', () => {
+    assert.deepEqual(decide('/admin', 'signedIn'), { type: 'notFound' });
+    assert.deepEqual(resolveNavigation({ pathname: '/dashboard', status: 'signedIn', app: adminApp }), { type: 'notFound' });
+    assert.deepEqual(resolveNavigation({ pathname: '/login', status: 'signedOut', app: adminApp }), { type: 'notFound' });
+  });
+
+  it('reports an unknown path as not found', () => {
+    assert.deepEqual(decide('/dashboard/settings', 'signedIn'), { type: 'notFound' });
+  });
+
+  it('works with a trailing slash', () => {
+    assert.equal(decide('/register/', 'signedOut').type, 'render');
+  });
+});
+
+describe('appForPath', () => {
+  it('gives /admin and everything under it to the site admin app', () => {
+    for (const path of ['/admin', '/admin/', '/admin/login', '/admin/anything/deeper']) {
+      assert.equal(appForPath(path), adminApp, path);
+    }
+  });
+
+  it('gives every other path to the member app', () => {
+    for (const path of ['/', '/login', '/register', '/dashboard', '/administrator', '/admins', '/Admin']) {
+      assert.equal(appForPath(path), memberApp, path);
+    }
+  });
+});
+
+describe('createRouter for the member app', () => {
+  function start(pathname, status) {
+    const win = fakeWindow(pathname);
+    const session = fakeSession(status);
+    const rendered = [];
+    const router = createRouter({ win, session, render: (decision) => rendered.push(decision), app: memberApp });
+    router.start();
+    return { win, session, rendered };
+  }
+
+  it('moves from the sign-in page to the dashboard when the person signs in', () => {
+    const { win, session, rendered } = start('/login', 'signedOut');
+
+    session.set('signedIn');
+
+    assert.equal(win.location.pathname, '/dashboard');
+    assert.equal(rendered.at(-1).route.name, 'dashboard');
+  });
+
+  it('moves from the sign-up page to the dashboard when the account is created', () => {
+    const { win, session } = start('/register', 'signedOut');
+
+    session.set('signedIn');
+
+    assert.equal(win.location.pathname, '/dashboard');
+  });
+
+  it('moves to the sign-in page when the session ends', () => {
+    const { win, session, rendered } = start('/dashboard', 'signedIn');
+
+    session.set('signedOut');
+
+    assert.equal(win.location.pathname, '/login');
+    assert.equal(rendered.at(-1).route.name, 'login');
+  });
+
+  it('settles after a redirect instead of looping', () => {
+    const { rendered, win } = start('/', 'signedOut');
+
+    assert.equal(rendered.length, 1);
+    assert.equal(win.location.pathname, '/login');
   });
 });

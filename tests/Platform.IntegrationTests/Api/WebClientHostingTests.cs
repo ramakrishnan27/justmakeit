@@ -35,6 +35,10 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     [InlineData("/admin/")]
     [InlineData("/admin/login")]
     [InlineData("/admin/anything/deeper/than/that")]
+    [InlineData("/login")]
+    [InlineData("/register")]
+    [InlineData("/dashboard")]
+    [InlineData("/dashboard/")]
     public async Task EveryClientSideAddress_AnswersWithTheAppShell_ToAVisitorWhoIsNotSignedIn(string path)
     {
         var response = await _host.GetAsync(path);
@@ -53,17 +57,24 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
 
         Assert.Equal(root, await (await _host.GetAsync("/admin")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/admin/login")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/login")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/register")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/dashboard")).Content.ReadAsStringAsync());
     }
 
     [Fact]
-    public async Task OnlyTheAdminAddresses_FallBackToTheShell_SoApiTyposStillGetARealAnswer()
+    public async Task OnlyTheAppAddresses_FallBackToTheShell_SoApiTyposStillGetARealAnswer()
     {
         var typo = await _host.GetAsync("/v1/site/overviw");
         var elsewhere = await _host.GetAsync("/not-admin/login");
+        var authTypo = await _host.GetAsync("/v1/auth/googl/start");
+        var deeper = await _host.GetAsync("/dashboard/settings");
 
         Assert.NotEqual("text/html", typo.Content.Headers.ContentType?.MediaType);
         Assert.Equal(HttpStatusCode.Unauthorized, typo.StatusCode);
         Assert.NotEqual("text/html", elsewhere.Content.Headers.ContentType?.MediaType);
+        Assert.NotEqual("text/html", authTypo.Content.Headers.ContentType?.MediaType);
+        Assert.NotEqual("text/html", deeper.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]
@@ -143,7 +154,9 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
                  {
                      "/js/main.js", "/js/core/api.js", "/js/core/session.js", "/js/core/router.js", "/js/core/jwt.js",
                      "/js/core/format.js", "/js/core/messages.js", "/js/core/dom.js",
-                     "/js/pages/admin-login.js", "/js/pages/admin-dashboard.js"
+                     "/js/pages/admin-login.js", "/js/pages/admin-dashboard.js",
+                     "/js/pages/member-login.js", "/js/pages/member-register.js", "/js/pages/member-dashboard.js",
+                     "/js/core/roles.js", "/js/core/google.js"
                  })
         {
             Assert.Contains(expected, seen);
@@ -154,7 +167,11 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     public async Task TheClientFiles_AreOpenToAVisitorWhoIsNotSignedIn()
     {
         // The fallback authorization policy must not close the page that lets a person sign in.
-        foreach (var path in new[] { "/", "/admin", "/admin/login", "/css/app.css", "/js/main.js", "/js/pages/admin-login.js" })
+        foreach (var path in new[]
+                 {
+                     "/", "/admin", "/admin/login", "/login", "/register", "/dashboard", "/css/app.css", "/js/main.js",
+                     "/js/pages/admin-login.js", "/js/pages/member-login.js", "/js/pages/member-register.js"
+                 })
         {
             Assert.Equal(HttpStatusCode.OK, (await _host.GetAsync(path)).StatusCode);
         }

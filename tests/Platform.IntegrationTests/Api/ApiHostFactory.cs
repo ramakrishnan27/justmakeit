@@ -1,7 +1,9 @@
 using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Helpers.Constants;
@@ -14,7 +16,10 @@ namespace Platform.IntegrationTests.Api;
 /// default environment: it skips user-secrets and Swagger, so a developer's local secrets can never
 /// change what a test sees, and it does not migrate on start unless a test asks for that.
 /// </summary>
-public sealed class ApiHostFactory(IReadOnlyDictionary<string, string?> settings, string environment = "Production")
+public sealed class ApiHostFactory(
+    IReadOnlyDictionary<string, string?> settings,
+    string environment = "Production",
+    Action<IServiceCollection>? configureServices = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>A database address that refuses connections at once, for tests that must not reach a database.</summary>
@@ -42,6 +47,13 @@ public sealed class ApiHostFactory(IReadOnlyDictionary<string, string?> settings
         builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
         builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, RemoteIpFromHeaderStartupFilter>());
+
+        // A test never writes keys to the developer machine: the data-protection key ring lives in memory.
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddDataProtection().UseEphemeralDataProtectionProvider();
+            configureServices?.Invoke(services);
+        });
     }
 
     /// <summary>

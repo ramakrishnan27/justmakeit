@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ApiError, createApiClient } from '../js/core/api.js';
-import { createSession } from '../js/core/session.js';
+import { createSession, memberEndpoints } from '../js/core/session.js';
 import { jsonResponse, makeJwt, routedFetch } from './helpers.js';
 
 const me = { user: { id: 'u1', email: 'root@example.com', fullName: 'Root' }, role: 'siteadmin' };
@@ -197,5 +197,147 @@ describe('session', () => {
     it('is null when signed out', () => {
       assert.equal(setup({}).session.getClaims(), null);
     });
+  });
+});
+
+describe('the member session', () => {
+  const memberMe = {
+    user: { id: 'u2', email: 'ana@example.com', fullName: 'Ana Smith' },
+    agency: { id: 'a1', name: 'Northwind Foods', businessModel: 'company', plan: 'trial' },
+    role: 'marketingmanager',
+    memberships: [{ agencyId: 'a1', agencyName: 'Northwind Foods', businessModel: 'company', role: 'marketingmanager' }],
+  };
+  const memberToken = makeJwt({ user_id: 'u2', agency_id: 'a1', role: 'marketingmanager', exp: 1_900_000_000 });
+
+  function memberSetup(routes) {
+    const fetchFn = routedFetch(routes);
+    const api = createApiClient({ fetchFn, refreshPath: '/v1/auth/refresh' });
+    return { fetchFn, api, session: createSession(api, memberEndpoints) };
+  }
+
+  it('signs in through the member endpoints, and keeps the organization with the user and role', async () => {
+    const { fetchFn, session } = memberSetup({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+    });
+
+    await session.signIn('ana@example.com', 'a password');
+
+    assert.equal(session.state.status, 'signedIn');
+    assert.equal(session.state.role, 'marketingmanager');
+    assert.deepEqual(session.state.user, memberMe.user);
+    assert.deepEqual(session.state.organization, memberMe.agency);
+    assert.deepEqual(session.state.memberships, memberMe.memberships);
+    assert.deepEqual(
+      fetchFn.calls.map((call) => call.path),
+      ['/v1/auth/login', '/v1/auth/me'],
+    );
+  });
+
+  it('never calls the site admin endpoints', async () => {
+    const { fetchFn, session } = memberSetup({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+      'POST /v1/auth/logout': new Response(null, { status: 204 }),
+    });
+    await session.signIn('ana@example.com', 'a password');
+    await session.signOut();
+
+    assert.ok(fetchFn.calls.every((call) => !call.path.startsWith('/v1/site')));
+  });
+
+  it('creates an account and signs in with it, sending the organization and the kind of business', async () => {
+    const { fetchFn, api, session } = memberSetup({
+      'POST /v1/auth/register': jsonResponse(201, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+    });
+    const details = {
+      email: 'ana@example.com',
+      password: 'ten chars!!',
+      fullName: 'Ana Smith',
+      organizationName: 'Northwind Foods',
+      businessModel: 'company',
+    };
+
+    await session.register(details);
+
+    assert.equal(session.state.status, 'signedIn');
+    assert.equal(api.getAccessToken(), memberToken);
+    const [register] = fetchFn.calls;
+    assert.equal(register.headers.Authorization, undefined);
+    assert.deepEqual(JSON.parse(register.init.body), details);
+  });
+
+  it('stays signed out, holding no token, when the email is taken', async () => {
+    const { api, session } = memberSetup({
+      'POST /v1/auth/register': jsonResponse(409, { detail: 'An account with this email already exists.', code: 'email_taken' }),
+    });
+
+    await assert.rejects(
+      session.register({ email: 'ana@example.com', password: 'ten chars!!', organizationName: 'X', businessModel: 'company' }),
+      (error) => error instanceof ApiError && error.status === 409,
+    );
+
+    assert.notEqual(session.state.status, 'signedIn');
+    assert.equal(api.getAccessToken(), null);
+  });
+
+  it('forgets the token again if the new account cannot be loaded', async () => {
+    const { api, session } = memberSetup({
+      'POST /v1/auth/register': jsonResponse(201, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(500, {}),
+    });
+
+    await assert.rejects(session.register({ email: 'a@b.co', password: 'ten chars!!', organizationName: 'X', businessModel: 'creator' }));
+
+    assert.equal(api.getAccessToken(), null);
+    assert.notEqual(session.state.status, 'signedIn');
+  });
+
+  it('restores the session from the member refresh cookie', async () => {
+    const { session } = memberSetup({
+      'POST /v1/auth/refresh': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+    });
+
+    assert.equal(await session.restore(), true);
+
+    assert.equal(session.state.organization.businessModel, 'company');
+  });
+
+  it('reads the user id and the role from the access token', async () => {
+    const { session } = memberSetup({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+    });
+    await session.signIn('ana@example.com', 'a password');
+
+    const claims = session.getClaims();
+
+    assert.equal(claims.user_id, 'u2');
+    assert.equal(claims.role, 'marketingmanager');
+    assert.equal(claims.agency_id, 'a1');
+  });
+
+  it('ends the session, and forgets everything, on sign-out', async () => {
+    const { api, session } = memberSetup({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+      'POST /v1/auth/logout': new Response(null, { status: 204 }),
+    });
+    await session.signIn('ana@example.com', 'a password');
+
+    await session.signOut();
+
+    assert.equal(session.state.status, 'signedOut');
+    assert.equal(session.state.user, null);
+    assert.equal(session.state.role, null);
+    assert.equal(api.getAccessToken(), null);
+  });
+
+  it('has no sign-up in the site admin app', async () => {
+    const { session } = setup({});
+
+    await assert.rejects(session.register({}), /no sign-up/);
   });
 });

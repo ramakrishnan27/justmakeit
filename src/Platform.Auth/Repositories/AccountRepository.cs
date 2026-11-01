@@ -10,6 +10,7 @@ namespace Platform.Auth.Repositories;
 public sealed class AccountRepository(IDbConnectionFactory connections) : IAccountRepository
 {
     private const string UniqueEmailIndex = "ux_users_email";
+    private const string UniqueIdentityConstraint = "uq_user_identities_provider_subject";
 
     public async Task<UserLoginRecord?> FindLoginByEmailAsync(string normalizedEmail, CancellationToken cancellationToken)
     {
@@ -18,6 +19,16 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
         return await connection.QuerySingleOrDefaultAsync<UserLoginRecord>(new CommandDefinition(
             "SELECT id, email, password_hash, full_name FROM auth_find_user_by_email(@email)",
             new { email = normalizedEmail },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task<Guid?> FindUserIdByIdentityAsync(string provider, string subject, CancellationToken cancellationToken)
+    {
+        // No user yet: the function matches one exact (provider, subject) and returns only the user id.
+        await using var connection = await connections.OpenAsync(null, null, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(
+            "SELECT user_id FROM auth_find_user_by_identity(@provider, @subject)",
+            new { provider, subject },
             cancellationToken: cancellationToken));
     }
 
@@ -51,6 +62,16 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
                 transaction,
                 cancellationToken: cancellationToken));
 
+            if (account.Identity is { } identity)
+            {
+                // The connection acts as the new user, so own_insert lets this row in and nobody else's.
+                await connection.ExecuteAsync(new CommandDefinition(
+                    "INSERT INTO user_identities (user_id, provider, subject, email) VALUES (@UserId, @Provider, @Subject, @Email)",
+                    new { account.UserId, identity.Provider, identity.Subject, identity.Email },
+                    transaction,
+                    cancellationToken: cancellationToken));
+            }
+
             await connection.ExecuteAsync(new CommandDefinition(
                 "INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES (@AgencyId, @UserId, @businessModel, @role)",
                 new { account.AgencyId, account.UserId, businessModel = account.BusinessModel.ToDb(), role = account.Role.ToDb() },
@@ -67,9 +88,11 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
             return true;
         }
         catch (PostgresException exception)
-            when (exception.SqlState == PostgresErrorCodes.UniqueViolation && exception.ConstraintName == UniqueEmailIndex)
+            when (exception.SqlState == PostgresErrorCodes.UniqueViolation
+                  && exception.ConstraintName is UniqueEmailIndex or UniqueIdentityConstraint)
         {
             // Disposing the transaction rolls it back, so the agency inserted above does not survive.
+            // The same outside identity registering twice at once is "already registered" too.
             return false;
         }
     }

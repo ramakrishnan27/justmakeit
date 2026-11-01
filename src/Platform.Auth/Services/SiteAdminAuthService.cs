@@ -37,8 +37,9 @@ public sealed class SiteAdminAuthService(
         var user = await accounts.FindLoginByEmailAsync(EmailAddressHelper.Normalize(request.Email), cancellationToken);
 
         // Always verify something, so an unknown email costs the same time as a wrong password.
-        var passwordMatches = passwordHasher.Verify(request.Password!, user?.PasswordHash ?? passwordHasher.DummyHash);
-        if (user is null || !passwordMatches || !await siteAdmins.IsSiteAdminAsync(user.Id, cancellationToken))
+        var storedHash = user?.PasswordHash;
+        var passwordMatches = passwordHasher.Verify(request.Password!, storedHash ?? passwordHasher.DummyHash);
+        if (user is null || storedHash is null || !passwordMatches || !await siteAdmins.IsSiteAdminAsync(user.Id, cancellationToken))
         {
             // One error for "no such user", "wrong password" and "not a site admin": the endpoint must not
             // tell a visitor which addresses belong to site admins.

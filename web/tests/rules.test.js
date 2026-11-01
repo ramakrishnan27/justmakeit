@@ -55,6 +55,15 @@ describe('frontend rules', () => {
     }
   });
 
+  it('starts the router only after the session has settled, so a page renders once and reads one-time values once', () => {
+    const main = code(join(webRoot, 'js', 'main.js'));
+    const restored = main.indexOf('await session.restore()');
+    const created = main.indexOf('createRouter(');
+
+    assert.ok(restored > 0 && created > 0, 'main.js restores the session and creates the router');
+    assert.ok(restored < created, 'the router is created after the session is restored');
+  });
+
   it('the page ships a content security policy that allows scripts and styles from its own origin only', () => {
     const html = readFileSync(join(webRoot, 'index.html'), 'utf8');
     const policy = html.match(/Content-Security-Policy"\s+content="([^"]+)"/)?.[1] ?? '';

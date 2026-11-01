@@ -49,13 +49,40 @@ public sealed class AuthService(
             WorkspaceId: Guid.NewGuid(),
             WorkspaceName: string.IsNullOrWhiteSpace(request.WorkspaceName) ? DefaultWorkspaceName : request.WorkspaceName.Trim());
 
+        return await CreateAccountAndStartSessionAsync(account, cancellationToken);
+    }
+
+    public async Task<AuthResult> RegisterExternalAsync(ExternalRegistration registration, CancellationToken cancellationToken)
+    {
+        registration.Validate().ThrowIfAny();
+
+        var email = EmailAddressHelper.Normalize(registration.Email);
+        var businessModel = registration.BusinessModel;
+        var account = new NewAccount(
+            UserId: Guid.NewGuid(),
+            Email: email,
+            PasswordHash: null,
+            FullName: registration.FullName?.Trim() ?? string.Empty,
+            AgencyId: Guid.NewGuid(),
+            AgencyName: registration.OrganizationName!.Trim(),
+            BusinessModel: businessModel,
+            Role: businessModel.FounderRole(),
+            WorkspaceId: Guid.NewGuid(),
+            WorkspaceName: DefaultWorkspaceName,
+            Identity: new ExternalIdentity(registration.Provider, registration.Subject, email));
+
+        return await CreateAccountAndStartSessionAsync(account, cancellationToken);
+    }
+
+    private async Task<AuthResult> CreateAccountAndStartSessionAsync(NewAccount account, CancellationToken cancellationToken)
+    {
         if (!await accounts.CreateAccountAsync(account, cancellationToken))
         {
             throw new ConflictException("An account with this email already exists.", "email_taken");
         }
 
         logger.LogInformation(
-            "Registered user {UserId} with new {BusinessModel} organization {AgencyId}", account.UserId, businessModel, account.AgencyId);
+            "Registered user {UserId} with new {BusinessModel} organization {AgencyId}", account.UserId, account.BusinessModel, account.AgencyId);
         return await StartSessionAsync(account.UserId, account.AgencyId, account.Role, cancellationToken);
     }
 
@@ -65,29 +92,40 @@ public sealed class AuthService(
 
         var user = await accounts.FindLoginByEmailAsync(EmailAddressHelper.Normalize(request.Email), cancellationToken);
 
-        // Always verify something, so an unknown email costs the same time as a wrong password.
-        var passwordMatches = passwordHasher.Verify(request.Password!, user?.PasswordHash ?? passwordHasher.DummyHash);
-        if (user is null || !passwordMatches)
+        // Always verify something, so an unknown email costs the same time as a wrong password. A person
+        // who signed up with Google has no password hash: nothing they type can match, and the answer is
+        // the same 401 as for any wrong password.
+        var storedHash = user?.PasswordHash;
+        var passwordMatches = passwordHasher.Verify(request.Password!, storedHash ?? passwordHasher.DummyHash);
+        if (user is null || storedHash is null || !passwordMatches)
         {
             throw new UnauthorizedException("Email or password is incorrect.", "invalid_credentials");
         }
 
-        var userMemberships = await memberships.ListForUserAsync(user.Id, cancellationToken);
+        return await SignInToMembershipAsync(user.Id, request.AgencyId, cancellationToken);
+    }
+
+    public Task<AuthResult> LoginExternalAsync(Guid userId, CancellationToken cancellationToken) =>
+        SignInToMembershipAsync(userId, null, cancellationToken);
+
+    private async Task<AuthResult> SignInToMembershipAsync(Guid userId, Guid? requestedAgencyId, CancellationToken cancellationToken)
+    {
+        var userMemberships = await memberships.ListForUserAsync(userId, cancellationToken);
         if (userMemberships.Count == 0)
         {
             throw new ForbiddenException("This account does not belong to any organization.", "no_agency");
         }
 
         // The list is ordered most recently used first, so the first entry is the default.
-        var membership = request.AgencyId is { } requested
+        var membership = requestedAgencyId is { } requested
             ? userMemberships.FirstOrDefault(m => m.AgencyId == requested)
               ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member")
             : userMemberships[0];
 
-        await memberships.TouchAsync(membership.AgencyId, user.Id, time.GetUtcNow(), cancellationToken);
+        await memberships.TouchAsync(membership.AgencyId, userId, time.GetUtcNow(), cancellationToken);
 
-        logger.LogInformation("User {UserId} signed in to agency {AgencyId}", user.Id, membership.AgencyId);
-        return await StartSessionAsync(user.Id, membership.AgencyId, membership.Role, cancellationToken);
+        logger.LogInformation("User {UserId} signed in to agency {AgencyId}", userId, membership.AgencyId);
+        return await StartSessionAsync(userId, membership.AgencyId, membership.Role, cancellationToken);
     }
 
     public async Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken cancellationToken)

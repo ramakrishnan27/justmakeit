@@ -5,6 +5,9 @@ public sealed class UserLoginRecord
 {
     public Guid Id { get; set; }
     public string Email { get; set; } = string.Empty;
-    public string PasswordHash { get; set; } = string.Empty;
+
+    /// <summary>Null for a person who signed up with Google and never chose a password: no password can match.</summary>
+    public string? PasswordHash { get; set; }
+
     public string FullName { get; set; } = string.Empty;
 }

@@ -1,4 +1,4 @@
-/* Site admin app. Written for a 360 px phone first; wider screens add to it. No framework, no build step. */
+/* Site admin and member apps. Written for a 360 px phone first; wider screens add to it. No framework, no build step. */
 
 :root {
   color-scheme: light dark;
@@ -172,6 +172,10 @@ input:focus-visible { border-color: var(--focus); }
 }
 
 .auth-card { width: 100%; max-width: 400px; }
+.auth-card-wide { max-width: 520px; }
+.auth-switch { margin-top: 20px; text-align: center; color: var(--muted); }
+.auth-switch a { color: var(--primary); font-weight: 600; }
+.hint { margin-top: 6px; color: var(--muted); font-size: 0.8125rem; }
 .auth-card h1 { margin: 4px 0 8px; }
 .auth-card .muted { margin-bottom: 20px; }
 
@@ -217,6 +221,7 @@ input:focus-visible { border-color: var(--focus); }
 .badge-trial { background: var(--trial-bg); color: var(--trial-text); }
 .badge-paid { background: var(--paid-bg); color: var(--paid-text); }
 .badge-model { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+.badge-muted { background: var(--surface-2); color: var(--muted); }
 
 .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 
@@ -289,4 +294,72 @@ input:focus-visible { border-color: var(--focus); }
 
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
+/* ---------- Sign-up choices, the Google button and the member dashboard ---------- */
+
+input[type="radio"] { width: auto; min-height: 0; margin: 2px 0 0; accent-color: var(--primary); flex: none; }
+
+fieldset.field { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+fieldset.field[hidden] { display: none; }
+fieldset.field legend { padding: 0; margin-bottom: 8px; font-weight: 600; font-size: 0.9375rem; }
+
+/* label.choice, not just .choice: the general ".field label" rule (block, bold) would otherwise win. */
+fieldset.field label.choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: start;
+  margin-bottom: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-weight: 400;
+  cursor: pointer;
+}
+.choice:hover { background: var(--surface-2); }
+.choice:has(input:checked) { border-color: var(--primary); background: var(--accent-bg); }
+.choice:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.choice-title { font-weight: 600; }
+.choice-text { grid-column: 2; color: var(--muted); font-size: 0.875rem; font-weight: 400; }
+.choice-compact { align-items: center; }
+.choice-compact input { margin: 0; }
+
+.button-google { gap: 10px; }
+.google-region { margin-bottom: 4px; }
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+.role-card { display: grid; gap: 8px; }
+.ability-list, .soon-list, .workspace-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ability-list { max-width: 36rem; }
+.ability {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.ability > span:first-child { min-width: 0; }
+.ability .badge { flex: none; }
+.soon-item h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.workspace { padding: 14px; }
+.workspace-name { overflow-wrap: anywhere; }
+.add-workspace-card { margin-top: 12px; }
+.add-workspace-card h3 { margin-bottom: 12px; }
+
+@media (min-width: 720px) {
+  .soon-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

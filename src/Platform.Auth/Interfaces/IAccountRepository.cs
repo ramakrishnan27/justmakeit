@@ -10,6 +10,12 @@ public interface IAccountRepository
     /// </summary>
     Task<UserLoginRecord?> FindLoginByEmailAsync(string normalizedEmail, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The user an outside sign-in (for example Google's id for the person) belongs to, or null. Like the email
+    /// lookup it needs no tenant: it goes through auth_find_user_by_identity().
+    /// </summary>
+    Task<Guid?> FindUserIdByIdentityAsync(string provider, string subject, CancellationToken cancellationToken);
+
     Task<UserRecord?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 
     /// <summary>
