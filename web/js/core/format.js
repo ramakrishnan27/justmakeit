@@ -29,6 +29,19 @@ export function planLabel(plan) {
   return text.length === 0 ? '–' : text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+const businessModelLabels = { company: 'Company', agency: 'Marketing agency', creator: 'Individual creator' };
+
+/**
+ * A business model from the API (`company`, `agency`, `creator`) as a label. A model this client does
+ * not know is shown as given, capitalised, so a newer server never leaves a blank.
+ */
+export function businessModelLabel(model) {
+  if (typeof model !== 'string' || model.length === 0) {
+    return '–';
+  }
+  return Object.hasOwn(businessModelLabels, model) ? businessModelLabels[model] : model.charAt(0).toUpperCase() + model.slice(1);
+}
+
 /** "1–20 of 45", or "0 results" when there is nothing. */
 export function pageSummary(page, pageSize, totalCount) {
   if (!(totalCount > 0)) {

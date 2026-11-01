@@ -23,11 +23,11 @@ public sealed class TenantContextTests
         var user = Guid.NewGuid();
         var tenant = new TenantContext();
 
-        tenant.Set(agency, user, "admin");
+        tenant.Set(agency, user, "organizationadmin");
 
         Assert.Equal(agency, tenant.AgencyId);
         Assert.Equal(user, tenant.UserId);
-        Assert.Equal("admin", tenant.Role);
+        Assert.Equal("organizationadmin", tenant.Role);
         Assert.Equal(agency, tenant.RequireAgencyId());
         Assert.Equal(user, tenant.RequireUserId());
     }
@@ -36,7 +36,7 @@ public sealed class TenantContextTests
     public void Clear_RemovesEverything()
     {
         var tenant = new TenantContext();
-        tenant.Set(Guid.NewGuid(), Guid.NewGuid(), "owner");
+        tenant.Set(Guid.NewGuid(), Guid.NewGuid(), "organizationadmin");
 
         tenant.Clear();
 

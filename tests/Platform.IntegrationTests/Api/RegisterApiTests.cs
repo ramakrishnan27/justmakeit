@@ -11,13 +11,15 @@ namespace Platform.IntegrationTests.Api;
 [Trait("Category", "Docker")]
 public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
-    private async Task<HttpResponseMessage> RegisterRawAsync(string email, string agencyName = "Acme Agency", string? workspaceName = null) =>
+    private async Task<HttpResponseMessage> RegisterRawAsync(
+        string email, string organizationName = "Acme Agency", string? workspaceName = null, string businessModel = "agency") =>
         await Host.PostAsync("/v1/auth/register", new
         {
             email,
             password = ApiTestHost.DefaultPassword,
             fullName = "Ana Smith",
-            agencyName,
+            organizationName,
+            businessModel,
             workspaceName
         });
 
@@ -36,7 +38,7 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
     }
 
     [Fact]
-    public async Task Register_AccessToken_IsHs256_FifteenMinutes_WithUserAgencyAndOwnerRole()
+    public async Task Register_AccessToken_IsHs256_FifteenMinutes_WithUserAgencyAndOrganizationAdminRole()
     {
         var session = await Host.RegisterAsync();
 
@@ -46,7 +48,7 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
         Assert.Equal(TimeSpan.FromMinutes(15), token.ValidTo - token.ValidFrom);
         Assert.Equal(session.UserId.ToString(), token.GetClaim("user_id").Value);
         Assert.Equal(session.AgencyId.ToString(), token.GetClaim("agency_id").Value);
-        Assert.Equal("owner", token.GetClaim("role").Value);
+        Assert.Equal("organizationadmin", token.GetClaim("role").Value);
     }
 
     [Fact]
@@ -105,18 +107,71 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
     }
 
     [Fact]
-    public async Task Register_CreatesATrialAgency_AnOwnerMembership_AndAFirstWorkspace()
+    public async Task Register_CreatesATrialOrganization_AFounderMembership_AndAFirstWorkspace()
     {
         var session = await Host.RegisterAsync(agencyName: "Bright Ideas");
 
         var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", session.AccessToken));
         Assert.Equal("Bright Ideas", me.GetProperty("agency").GetProperty("name").GetString());
         Assert.Equal("trial", me.GetProperty("agency").GetProperty("plan").GetString());
-        Assert.Equal("owner", me.GetProperty("role").GetString());
+        Assert.Equal("agency", me.GetProperty("agency").GetProperty("businessModel").GetString());
+        Assert.Equal("organizationadmin", me.GetProperty("role").GetString());
         Assert.Single(me.GetProperty("memberships").EnumerateArray());
 
         var workspaces = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/workspaces", session.AccessToken));
         Assert.Equal(["Main workspace"], workspaces.EnumerateArray().Select(w => w.GetProperty("name").GetString()));
+    }
+
+    [Theory]
+    [InlineData("company", "organizationadmin")]
+    [InlineData("agency", "organizationadmin")]
+    [InlineData("creator", "contentwriter")]
+    public async Task Register_EachBusinessModel_GetsItsFounderRole_InTheTokenAndInMe_AndInTheDatabase(string model, string role)
+    {
+        var session = await Host.RegisterAsync(businessModel: model);
+
+        Assert.Equal(role, new JsonWebToken(session.AccessToken).GetClaim("role").Value);
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", session.AccessToken));
+        Assert.Equal(model, me.GetProperty("agency").GetProperty("businessModel").GetString());
+        Assert.Equal(role, me.GetProperty("role").GetString());
+        var membership = Assert.Single(me.GetProperty("memberships").EnumerateArray());
+        Assert.Equal(model, membership.GetProperty("businessModel").GetString());
+        Assert.Equal(role, membership.GetProperty("role").GetString());
+
+        Assert.Equal(model, await OwnerQueryAsync<string>(
+            "SELECT business_model FROM agencies WHERE id = @id", new { id = session.AgencyId }));
+        Assert.Equal((model, role), (
+            await OwnerQueryAsync<string>("SELECT business_model FROM agency_members WHERE agency_id = @id", new { id = session.AgencyId }),
+            await OwnerQueryAsync<string>("SELECT role FROM agency_members WHERE agency_id = @id", new { id = session.AgencyId })));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Company")]
+    [InlineData("individual")]
+    public async Task Register_WithoutAKnownBusinessModel_Returns400_AndCreatesNothing(string? businessModel)
+    {
+        var response = await RegisterRawAsync("ana@example.com", businessModel: businessModel!);
+
+        AssertStatus(HttpStatusCode.BadRequest, response);
+        var errors = (await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors");
+        Assert.True(errors.TryGetProperty("businessModel", out _));
+        Assert.Equal(0, await OwnerQueryAsync<long>("SELECT count(*) FROM users"));
+        Assert.Equal(0, await OwnerQueryAsync<long>("SELECT count(*) FROM agencies"));
+    }
+
+    [Fact]
+    public async Task Register_WithTheOldAgencyNameField_IsNotAnOrganizationName()
+    {
+        // The field was renamed. A client that still sends agencyName is told what is missing, not guessed at.
+        var response = await Host.PostAsync("/v1/auth/register", new
+        {
+            email = "ana@example.com", password = ApiTestHost.DefaultPassword, agencyName = "Acme", businessModel = "company"
+        });
+
+        AssertStatus(HttpStatusCode.BadRequest, response);
+        Assert.True((await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors").TryGetProperty("organizationName", out _));
     }
 
     [Fact]
@@ -159,13 +214,14 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
     [Fact]
     public async Task Register_WithInvalidInput_Returns400_ListingEachBadField_AndCreatesNothing()
     {
-        var response = await Host.PostAsync("/v1/auth/register", new { email = "nope", password = "short", agencyName = "" });
+        var response = await Host.PostAsync("/v1/auth/register", new { email = "nope", password = "short", organizationName = "", businessModel = "nope" });
 
         AssertStatus(HttpStatusCode.BadRequest, response);
         var errors = (await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors");
         Assert.Equal("Enter a valid email address.", errors.GetProperty("email")[0].GetString());
         Assert.Contains("at least 10", errors.GetProperty("password")[0].GetString());
-        Assert.True(errors.TryGetProperty("agencyName", out _));
+        Assert.True(errors.TryGetProperty("organizationName", out _));
+        Assert.Equal("Business model must be one of: company, agency, creator.", errors.GetProperty("businessModel")[0].GetString());
         Assert.Equal(0, await OwnerQueryAsync<long>("SELECT count(*) FROM users"));
         Assert.Equal(0, await OwnerQueryAsync<long>("SELECT count(*) FROM agencies"));
     }

@@ -20,7 +20,11 @@ namespace Platform.Auth.Controllers;
 [EnableRateLimiting(AuthRateLimitPolicies.Session)]
 public sealed class AuthController(IAuthService auth) : ControllerBase
 {
-    /// <summary>Creates a user, a trial agency, an owner membership and a first workspace, and signs the user in.</summary>
+    /// <summary>
+    /// Creates a user, a trial organization of the chosen business model (company, agency or creator), the
+    /// founder's membership and a first workspace, and signs the user in. A company or agency founder is an
+    /// organization admin; a creator is a content writer.
+    /// </summary>
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
@@ -31,7 +35,7 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
         return Issue(await auth.RegisterAsync(request, cancellationToken), StatusCodes.Status201Created);
     }
 
-    /// <summary>Signs in with email and password, to the requested agency or the most recently used one.</summary>
+    /// <summary>Signs in with email and password, to the requested organization or the most recently used one.</summary>
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]

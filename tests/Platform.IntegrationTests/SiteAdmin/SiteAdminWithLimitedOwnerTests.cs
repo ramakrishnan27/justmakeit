@@ -7,6 +7,7 @@ using Platform.Auth.Models;
 using Platform.Auth.Repositories;
 using Platform.Auth.Services;
 using Platform.Auth.Settings;
+using Platform.Helpers.Constants;
 using Platform.Infrastructure.Data;
 using Platform.Infrastructure.Settings;
 using Platform.IntegrationTests.Infrastructure;
@@ -40,7 +41,7 @@ public sealed class SiteAdminWithLimitedOwnerTests(PostgresFixture postgres) : I
         // Through the app role and the registration repository, because the owner itself cannot insert
         // tenant rows under forced row-level security without acting as that tenant.
         var account = new NewAccount(
-            Guid.NewGuid(), email, "pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==", "Owner", Guid.NewGuid(), agencyName, Guid.NewGuid(), workspaceName);
+            Guid.NewGuid(), email, "pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==", "Owner", Guid.NewGuid(), agencyName, BusinessModel.Agency, OrganizationRole.OrganizationAdmin, Guid.NewGuid(), workspaceName);
         Assert.True(await new AccountRepository(_db.CreateFactory()).CreateAccountAsync(account, CancellationToken.None));
         return account.AgencyId;
     }

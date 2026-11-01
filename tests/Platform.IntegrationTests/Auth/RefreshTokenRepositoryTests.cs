@@ -29,10 +29,10 @@ public sealed class RefreshTokenRepositoryTests(PostgresFixture postgres) : IAsy
         _agencyB = await DbTestSupport.InsertAgencyAsync(owner, "Agency B");
         _userA = await DbTestSupport.InsertUserAsync(owner, "a@example.com");
         _userB = await DbTestSupport.InsertUserAsync(owner, "b@example.com");
-        await DbTestSupport.InsertMemberAsync(owner, _agencyA, _userA, "owner");
-        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userB, "owner");
+        await DbTestSupport.InsertMemberAsync(owner, _agencyA, _userA, "organizationadmin");
+        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userB, "organizationadmin");
         // User A also works in agency B, so one user can hold tokens for two agencies.
-        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userA, "viewer");
+        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userA, "clientmanager");
     }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();

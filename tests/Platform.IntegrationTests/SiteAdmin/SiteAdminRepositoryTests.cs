@@ -2,6 +2,7 @@ using Dapper;
 using Npgsql;
 using Platform.Auth.Models;
 using Platform.Auth.Repositories;
+using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Infrastructure.Data;
 using Platform.IntegrationTests.Infrastructure;
@@ -33,8 +34,8 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
 
         await using var owner = await _db.OpenOwnerAsync();
         _alpha = await DbTestSupport.InsertAgencyAsync(owner, "Alpha");
-        _bravo = await DbTestSupport.InsertAgencyAsync(owner, "Bravo");
-        _charlie = await DbTestSupport.InsertAgencyAsync(owner, "Charlie");
+        _bravo = await DbTestSupport.InsertAgencyAsync(owner, "Bravo", "company");
+        _charlie = await DbTestSupport.InsertAgencyAsync(owner, "Charlie", "creator");
         await DbTestSupport.ExecuteAsync(owner, "UPDATE agencies SET plan = 'paid' WHERE id = $1", _bravo);
         await DbTestSupport.ExecuteAsync(owner, "UPDATE agencies SET created_at = $2 WHERE id = $1", _alpha, T0.UtcDateTime);
         await DbTestSupport.ExecuteAsync(owner, "UPDATE agencies SET created_at = $2 WHERE id = $1", _bravo, T0.AddHours(1).UtcDateTime);
@@ -47,10 +48,10 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
         _siteAdmin = await DbTestSupport.InsertUserAsync(owner, "root@example.com");
         _otherSiteAdmin = await DbTestSupport.InsertUserAsync(owner, "root2@example.com");
 
-        await DbTestSupport.InsertMemberAsync(owner, _alpha, _alphaOwner, "owner");
-        await DbTestSupport.InsertMemberAsync(owner, _alpha, _alphaViewer, "viewer");
-        await DbTestSupport.InsertMemberAsync(owner, _bravo, _bravoOwner, "owner");
-        await DbTestSupport.InsertMemberAsync(owner, _charlie, _charlieOwner, "owner");
+        await DbTestSupport.InsertMemberAsync(owner, _alpha, _alphaOwner, "organizationadmin");
+        await DbTestSupport.InsertMemberAsync(owner, _alpha, _alphaViewer, "clientmanager");
+        await DbTestSupport.InsertMemberAsync(owner, _bravo, _bravoOwner, "organizationadmin");
+        await DbTestSupport.InsertMemberAsync(owner, _charlie, _charlieOwner, "contentwriter");
 
         await DbTestSupport.InsertWorkspaceAsync(owner, _alpha, "Alpha one");
         await DbTestSupport.InsertWorkspaceAsync(owner, _alpha, "Alpha two");
@@ -224,6 +225,7 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(3, page.TotalCount);
         Assert.Equal(["Charlie", "Bravo", "Alpha"], page.Items.Select(a => a.Name));
         Assert.Equal([AgencyPlan.Trial, AgencyPlan.Paid, AgencyPlan.Trial], page.Items.Select(a => a.Plan));
+        Assert.Equal([BusinessModel.Creator, BusinessModel.Company, BusinessModel.Agency], page.Items.Select(a => a.BusinessModel));
         Assert.Equal([1L, 1L, 2L], page.Items.Select(a => a.MemberCount));
         Assert.Equal([0L, 1L, 2L], page.Items.Select(a => a.WorkspaceCount));
         Assert.Equal(T0.AddHours(2), page.Items[0].CreatedAt);

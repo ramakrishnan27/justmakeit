@@ -114,12 +114,17 @@ public sealed class ApiTestHost : IAsyncDisposable
         return await Client.SendAsync(request);
     }
 
-    /// <summary>Registers a new user and agency through the API, then reads their ids back with /me.</summary>
-    public async Task<Session> RegisterAsync(string? email = null, string agencyName = "Acme Agency", string password = DefaultPassword)
+    /// <summary>
+    /// Registers a new user and organization through the API, then reads their ids back with /me.
+    /// <paramref name="agencyName"/> is the organization name; <paramref name="businessModel"/> is company, agency or creator.
+    /// </summary>
+    public async Task<Session> RegisterAsync(
+        string? email = null, string agencyName = "Acme Agency", string password = DefaultPassword, string businessModel = "agency")
     {
         email ??= $"user{Interlocked.Increment(ref _counter)}-{Guid.NewGuid():N}@example.com";
 
-        var response = await PostAsync("/v1/auth/register", new { email, password, fullName = "Test User", agencyName });
+        var response = await PostAsync(
+            "/v1/auth/register", new { email, password, fullName = "Test User", organizationName = agencyName, businessModel });
         response.EnsureSuccessStatusCode();
         return await ToSessionAsync(response, email, password);
     }

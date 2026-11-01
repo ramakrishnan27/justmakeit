@@ -216,6 +216,7 @@ input:focus-visible { border-color: var(--focus); }
 .badge-accent { background: var(--accent-bg); color: var(--accent-text); }
 .badge-trial { background: var(--trial-bg); color: var(--trial-text); }
 .badge-paid { background: var(--paid-bg); color: var(--paid-text); }
+.badge-model { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
 
 .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 
@@ -244,6 +245,7 @@ input:focus-visible { border-color: var(--focus); }
   padding: 14px;
 }
 .agency-name { overflow-wrap: anywhere; }
+.agency-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 .agency-facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .agency-facts div { min-width: 0; }
@@ -279,7 +281,9 @@ input:focus-visible { border-color: var(--focus); }
 }
 
 @media (min-width: 720px) {
-  .agency { grid-template-columns: minmax(0, 2fr) auto minmax(0, 3fr); }
+  /* A fixed middle column, so the facts line up from one row to the next whatever the badges say. */
+  .agency { grid-template-columns: minmax(0, 2fr) 15rem minmax(0, 3fr); }
+  .agency-badges { justify-content: flex-start; }
   .agency-facts { grid-column: auto; }
 }
 

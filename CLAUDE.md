@@ -1,8 +1,13 @@
 # CLAUDE.md
 
-Multi-tenant email campaign platform for marketing agencies. An agency has client workspaces; each workspace has
-contacts, templates and campaigns. Only the **Email** channel is built; Facebook, Instagram, SMS, WhatsApp and YouTube
-exist as empty stubs so they can be added later as their own projects.
+Multi-tenant email campaign platform. Each customer is an **organization** of one of three business models: a company,
+a marketing agency that serves several clients, or an individual creator. An organization has workspaces (one per client
+in an agency); each workspace has contacts, templates and campaigns. Only the **Email** channel is built; Facebook,
+Instagram, SMS, WhatsApp and YouTube exist as empty stubs so they can be added later as their own projects.
+
+**Naming:** in the tables, code, routes and the token an organization is still called an **agency** (`agencies`,
+`agency_id`, `app.agency_id`, `/v1/auth/switch-agency`). `agency` is also one of the three business models, so read
+"agency" as the tenant unless it says business model. Anything a person sees says "organization".
 
 ## Stack
 
@@ -93,14 +98,16 @@ migrator sets that role's password from this string, so it is configured in one 
 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
-  `001_init.sql` and `002_site_admin.sql` are released: do not change them. Phase 2 writes `003_email.sql`.
+  `001_init.sql`, `002_site_admin.sql` and `003_business_models.sql` are released: do not change them. Phase 2 writes
+  `004_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
+  example the return type of a function that `CREATE OR REPLACE` makes again): add a new function instead.
 - The API connects as `app_user` (not superuser, no BYPASSRLS, never to be given either). `NpgsqlConnectionFactory`
   sets `app.agency_id` and `app.user_id` on every connection it opens; `app_agency_id()` / `app_user_id()` read them and
   return NULL when unset or empty, so access fails closed.
 - Every tenant table: `id uuid` PK, `agency_id uuid NOT NULL REFERENCES agencies(id) ON DELETE CASCADE`, `created_at
   timestamptz`, RLS **enabled and forced**, policy `tenant_isolation` (`USING` and `WITH CHECK` on `agency_id =
   app_agency_id()`). Status/type columns are `text` + `CHECK` with the lower-cased C# enum names. Foreign keys are
-  indexed. snake_case names.
+  indexed. snake_case names. `agencies` and `agency_members` also carry `business_model` (see Business models and roles).
 - Work that must span agencies (workers, login, refresh) uses narrow `SECURITY DEFINER` functions that return only ids
   or the one row asked for. Never grant BYPASSRLS.
 - Dapper rules: row models are **classes with settable properties** (underscore matching does not apply to constructor
@@ -135,7 +142,7 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `003_email.sql` (was 002; `002_site_admin.sql` took that number), senders, contacts, lists, suppressions, CSV import |
+| 2 | `004_email.sql` (was 002; `002_site_admin.sql` and `003_business_models.sql` took those numbers), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
@@ -185,7 +192,8 @@ or was skipped, and any open question.
   race) revokes every live token of that user for that agency and logs a warning. The role in a refreshed token comes from
   the database, and a user who left the agency cannot refresh.
 - Policies live in Platform.Auth (`AuthPolicies`), their names in `Platform.Helpers.Constants.PolicyNames`: `CanRead` (any
-  role), `CanWrite` (owner/admin/manager), `CanManage` (owner/admin: members and workspaces). The **fallback policy requires a
+  role), `CanWrite` (owner/admin/manager), `CanManage` (owner/admin: members and workspaces). *(The roles were replaced
+  later, see Business models and roles. The policy names stayed.)* The **fallback policy requires a
   signed-in user with an agency**, so anything not marked `[AllowAnonymous]` is closed; as a side effect a request for an
   unknown route answers 401, not 404, when anonymous. Policies read the token's role claim, so a role change takes up to 15
   minutes to reach an existing access token; services re-check the role, and `/me` and refresh read it from the database.
@@ -241,7 +249,50 @@ or was skipped, and any open question.
   error). `web/tests` is never served. The page has a strict CSP (no inline script or style) and no `innerHTML`; both
   rules, and "tokens only in memory", are enforced by `web/tests/rules.test.js`. The access token lives only in the page;
   a reload restores the session from the cookie.
-- Migration numbering: this took `002`, so Phase 2's email script is now `003_email.sql`.
+- Migration numbering: this took `002`, so Phase 2's email script moved to `003_email.sql`; business models then took
+  `003` and it is now `004_email.sql`.
 - Verified in a real browser (headless Edge over the DevTools protocol, throwaway profile): redirect to sign-in, wrong
   password message, dashboard at 360 px and 1280 px, paging, reload restores the session, sign out, not-found page, nothing
   in local/session storage, no horizontal scroll, no script errors (the only console entries are the expected 401s).
+
+**Business models and roles (requested by the user: "3 business models with 7 role types")**
+- Scope: roles and business models only. The social, AI and approval wording in the role descriptions belongs to later
+  features and is not built; phases 2 to 5 (email) are unchanged. The request said 7 role types, but its tables name 4
+  different roles (3 + 4 + 1 = 8 role slots); the user chose **4 shared roles**.
+- Business models (`BusinessModel`, stored lower-case in `agencies.business_model`): `company`, `agency` (a marketing
+  agency with several clients), `creator` (one person). Chosen at registration (`businessModel`, required, exact
+  lower-case name) and **never changed**: `agency_members` repeats it and references `(id, business_model)` of the
+  agency, so the foreign key refuses a change while the organization has members.
+- Roles (`OrganizationRole`, replacing `AgencyRole`), stored and in the token as `organizationadmin`, `clientmanager`,
+  `marketingmanager`, `contentwriter`. The JSON the API sends spells them the same way (`OrganizationRoleJsonConverter`),
+  because the general enum converter would write `organizationAdmin`.
+
+  | Model | Roles allowed |
+  |---|---|
+  | company | organizationadmin, marketingmanager, contentwriter |
+  | agency | organizationadmin, clientmanager, marketingmanager, contentwriter |
+  | creator | contentwriter (exactly one member) |
+
+  The founder is an organizationadmin (company, agency) or the contentwriter (creator). One CHECK
+  (`ck_agency_members_role_model`) holds the table, `BusinessModelRules` in Platform.Auth holds the same one, and
+  `BusinessModelMigrationTests` compares them for every pair. A partial unique index limits a creator organization to one member.
+- Permissions (`RolePermissions`, policy names unchanged): `CanRead` every role; `CanWrite` organizationadmin,
+  marketingmanager, contentwriter (not clientmanager); `CanManage` organizationadmin only. There is no read-only role
+  any more, so `clientmanager` is the least-privileged one. Finer rules (approve, publish, connect accounts) get their own
+  policy when those features exist. A creator therefore cannot create workspaces by role, and `WorkspaceService` also refuses
+  a second workspace for a creator (409 `workspace_limit`); the database does not enforce that cap.
+- API: `POST /v1/auth/register` takes `organizationName` (was `agencyName`) and `businessModel`. `/v1/auth/me` and its
+  memberships carry `businessModel`. Error `code` values (`no_agency`, `not_a_member`) and routes are unchanged.
+- `003_business_models.sql` changes `agencies` and `agency_members` (approved with the plan): existing rows become the
+  `agency` model and their roles move owner/admin to organizationadmin, manager to marketingmanager, viewer to
+  contentwriter. An UPDATE under forced RLS changes nothing for an owner that is not a superuser, so the script creates a
+  policy `owner_migrate` for the migrating role, runs the remap and drops the policy again in the same block (RLS stays
+  enabled and forced, nothing is left behind). A test shows the policy is needed: with it removed the superuser upgrade still
+  passes and the limited-owner upgrade fails. No column default is kept, so an insert that forgets the model fails.
+- The site admin list needs the model, but 002 re-creates `site_admin_list_agencies()` on every start, so its return type is
+  frozen. `003` adds `site_admin_list_agencies_v2()` (same checks, adds `business_model`) and the API uses that; the old
+  function stays, unused. The dashboard shows a business model badge and says "Organizations".
+- Access tokens issued before this change carry the old role names and get 403 until refreshed (15 minutes at most).
+  Nothing was deployed, and the development database had no organizations.
+- Open: no endpoint adds or removes members yet, so "the last organizationadmin cannot be removed" is a rule for when they
+  are built. A creator will need a way to connect their own accounts later; `CanManage` is admin-only, so that needs its own policy.

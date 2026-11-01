@@ -30,7 +30,7 @@ public sealed class ApiHostFactory(IReadOnlyDictionary<string, string?> settings
     };
 
     /// <summary>An access token for the given user, agency and role, signed with this host's key.</summary>
-    public string CreateAccessToken(Guid userId, Guid agencyId, AgencyRole role) =>
+    public string CreateAccessToken(Guid userId, Guid agencyId, OrganizationRole role) =>
         TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role);
 
     /// <summary>A site admin token (user and role, no agency) signed with this host's key.</summary>

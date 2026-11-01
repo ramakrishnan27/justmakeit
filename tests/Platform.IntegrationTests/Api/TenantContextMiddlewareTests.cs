@@ -39,12 +39,12 @@ public sealed class TenantContextMiddlewareTests
         var (tenant, nextCalled) = await RunAsync(Authenticated(
             new Claim(ClaimNames.AgencyId, agency.ToString()),
             new Claim(ClaimNames.UserId, user.ToString()),
-            new Claim(ClaimNames.Role, "manager")));
+            new Claim(ClaimNames.Role, "marketingmanager")));
 
         Assert.True(nextCalled);
         Assert.Equal(agency, tenant.AgencyId);
         Assert.Equal(user, tenant.UserId);
-        Assert.Equal("manager", tenant.Role);
+        Assert.Equal("marketingmanager", tenant.Role);
     }
 
     [Fact]

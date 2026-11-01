@@ -47,9 +47,9 @@ public sealed class SiteAdminDashboardServiceTests
     }
 
     [Theory]
-    [InlineData("owner")]
-    [InlineData("admin")]
-    [InlineData("viewer")]
+    [InlineData("organizationadmin")]
+    [InlineData("clientmanager")]
+    [InlineData("contentwriter")]
     [InlineData("")]
     [InlineData(null)]
     public async Task Overview_ForAnyTokenThatIsNotASiteAdminToken_IsForbidden_BeforeTheDatabaseIsAsked(string? role)
@@ -76,11 +76,11 @@ public sealed class SiteAdminDashboardServiceTests
         SignInAsSiteAdmin();
         var first = new SiteAgencyRecord
         {
-            Id = Guid.NewGuid(), Name = "Acme", Plan = AgencyPlan.Paid, CreatedAt = Noon, MemberCount = 4, WorkspaceCount = 2, TotalCount = 45
+            Id = Guid.NewGuid(), Name = "Acme", BusinessModel = BusinessModel.Agency, Plan = AgencyPlan.Paid, CreatedAt = Noon, MemberCount = 4, WorkspaceCount = 2, TotalCount = 45
         };
         var second = new SiteAgencyRecord
         {
-            Id = Guid.NewGuid(), Name = "Bright", Plan = AgencyPlan.Trial, CreatedAt = Noon.AddDays(-1), MemberCount = 1, WorkspaceCount = 1, TotalCount = 45
+            Id = Guid.NewGuid(), Name = "Bright", BusinessModel = BusinessModel.Creator, Plan = AgencyPlan.Trial, CreatedAt = Noon.AddDays(-1), MemberCount = 1, WorkspaceCount = 1, TotalCount = 45
         };
         _siteAdmins.ListAgenciesAsync(_userId, 3, 20, Arg.Any<CancellationToken>())
             .Returns(new SiteAgencyPage([first, second], 45));
@@ -92,8 +92,8 @@ public sealed class SiteAdminDashboardServiceTests
         Assert.Equal(45, page.TotalCount);
         Assert.Equal(3, page.TotalPages);
         Assert.Equal(
-            [new SiteAgencyResponse(first.Id, "Acme", AgencyPlan.Paid, Noon, 4, 2),
-             new SiteAgencyResponse(second.Id, "Bright", AgencyPlan.Trial, Noon.AddDays(-1), 1, 1)],
+            [new SiteAgencyResponse(first.Id, "Acme", BusinessModel.Agency, AgencyPlan.Paid, Noon, 4, 2),
+             new SiteAgencyResponse(second.Id, "Bright", BusinessModel.Creator, AgencyPlan.Trial, Noon.AddDays(-1), 1, 1)],
             page.Items);
     }
 
@@ -129,8 +129,8 @@ public sealed class SiteAdminDashboardServiceTests
     }
 
     [Theory]
-    [InlineData("owner")]
-    [InlineData("manager")]
+    [InlineData("organizationadmin")]
+    [InlineData("marketingmanager")]
     [InlineData(null)]
     public async Task Agencies_ForAnyTokenThatIsNotASiteAdminToken_IsForbidden(string? role)
     {

@@ -12,7 +12,7 @@ namespace Platform.IntegrationTests.Api;
 /// </summary>
 public static class TestAccessTokens
 {
-    public static string Create(string signingKey, Guid userId, Guid agencyId, AgencyRole role) =>
+    public static string Create(string signingKey, Guid userId, Guid agencyId, OrganizationRole role) =>
         Sign(signingKey, new Dictionary<string, object>
         {
             [ClaimNames.UserId] = userId.ToString(),

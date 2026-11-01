@@ -7,7 +7,7 @@ public sealed class RequestValidationTests
 {
     private const string GoodPassword = "ten chars!!";
 
-    private static RegisterRequest GoodRegistration() => new("ana@example.com", GoodPassword, "Ana", "Acme", "Client one");
+    private static RegisterRequest GoodRegistration() => new("ana@example.com", GoodPassword, "Ana", "Acme", "company", "Client one");
 
     private static string[] Fields(Platform.Helpers.Validation.ValidationErrors errors) => [.. errors.ToDictionary().Keys.Order()];
 
@@ -22,7 +22,7 @@ public sealed class RequestValidationTests
     [Fact]
     public void Register_OptionalFieldsMayBeMissing()
     {
-        Assert.False(new RegisterRequest("ana@example.com", GoodPassword, null, "Acme", null).Validate().Any);
+        Assert.False(new RegisterRequest("ana@example.com", GoodPassword, null, "Acme", "creator", null).Validate().Any);
     }
 
     [Theory]
@@ -69,9 +69,40 @@ public sealed class RequestValidationTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Register_WithoutAnAgencyName_ReportsTheAgencyNameField(string? name)
+    public void Register_WithoutAnOrganizationName_ReportsTheOrganizationNameField(string? name)
     {
-        Assert.Equal(["agencyName"], Fields((GoodRegistration() with { AgencyName = name }).Validate()));
+        Assert.Equal(["organizationName"], Fields((GoodRegistration() with { OrganizationName = name }).Validate()));
+    }
+
+    [Theory]
+    [InlineData("company")]
+    [InlineData("agency")]
+    [InlineData("creator")]
+    public void Register_AcceptsEachBusinessModel(string businessModel)
+    {
+        Assert.False((GoodRegistration() with { BusinessModel = businessModel }).Validate().Any);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Company")]
+    [InlineData("AGENCY")]
+    [InlineData(" creator")]
+    [InlineData("individual")]
+    [InlineData("0")]
+    public void Register_WithoutAKnownBusinessModel_ReportsTheBusinessModelField(string? businessModel)
+    {
+        Assert.Equal(["businessModel"], Fields((GoodRegistration() with { BusinessModel = businessModel }).Validate()));
+    }
+
+    [Fact]
+    public void Register_TheBusinessModelMessage_NamesTheChoices()
+    {
+        var errors = (GoodRegistration() with { BusinessModel = "nope" }).Validate().ToDictionary();
+
+        Assert.Equal("Business model must be one of: company, agency, creator.", errors["businessModel"].Single());
     }
 
     [Fact]
@@ -80,25 +111,25 @@ public sealed class RequestValidationTests
         var errors = (GoodRegistration() with
         {
             FullName = new string('n', 201),
-            AgencyName = new string('a', 201),
+            OrganizationName = new string('a', 201),
             WorkspaceName = new string('w', 201)
         }).Validate();
 
-        Assert.Equal(["agencyName", "fullName", "workspaceName"], Fields(errors));
+        Assert.Equal(["fullName", "organizationName", "workspaceName"], Fields(errors));
     }
 
     [Fact]
     public void Register_ReportsEveryProblemAtOnce()
     {
-        var errors = new RegisterRequest("nope", "short", null, "", null).Validate();
+        var errors = new RegisterRequest("nope", "short", null, "", null, null).Validate();
 
-        Assert.Equal(["agencyName", "email", "password"], Fields(errors));
+        Assert.Equal(["businessModel", "email", "organizationName", "password"], Fields(errors));
     }
 
     [Fact]
     public void Register_ThrowIfAny_RaisesABadRequestWithFieldMessages()
     {
-        var exception = Assert.Throws<BadRequestException>(() => new RegisterRequest("nope", GoodPassword, null, "Acme", null).Validate().ThrowIfAny());
+        var exception = Assert.Throws<BadRequestException>(() => new RegisterRequest("nope", GoodPassword, null, "Acme", "company", null).Validate().ThrowIfAny());
 
         Assert.Equal(400, exception.StatusCode);
         Assert.Equal("validation_failed", exception.Code);

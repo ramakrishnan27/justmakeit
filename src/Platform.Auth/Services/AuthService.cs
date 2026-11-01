@@ -32,13 +32,20 @@ public sealed class AuthService(
     {
         request.Validate().ThrowIfAny();
 
+        // Validate() has accepted the text, so it names a business model.
+        var businessModel = BusinessModelRules.TryParse(request.BusinessModel, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException("The business model was validated but could not be read.");
+
         var account = new NewAccount(
             UserId: Guid.NewGuid(),
             Email: EmailAddressHelper.Normalize(request.Email),
             PasswordHash: passwordHasher.Hash(request.Password!),
             FullName: request.FullName?.Trim() ?? string.Empty,
             AgencyId: Guid.NewGuid(),
-            AgencyName: request.AgencyName!.Trim(),
+            AgencyName: request.OrganizationName!.Trim(),
+            BusinessModel: businessModel,
+            Role: businessModel.FounderRole(),
             WorkspaceId: Guid.NewGuid(),
             WorkspaceName: string.IsNullOrWhiteSpace(request.WorkspaceName) ? DefaultWorkspaceName : request.WorkspaceName.Trim());
 
@@ -47,8 +54,9 @@ public sealed class AuthService(
             throw new ConflictException("An account with this email already exists.", "email_taken");
         }
 
-        logger.LogInformation("Registered user {UserId} with new agency {AgencyId}", account.UserId, account.AgencyId);
-        return await StartSessionAsync(account.UserId, account.AgencyId, AgencyRole.Owner, cancellationToken);
+        logger.LogInformation(
+            "Registered user {UserId} with new {BusinessModel} organization {AgencyId}", account.UserId, businessModel, account.AgencyId);
+        return await StartSessionAsync(account.UserId, account.AgencyId, account.Role, cancellationToken);
     }
 
     public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -67,13 +75,13 @@ public sealed class AuthService(
         var userMemberships = await memberships.ListForUserAsync(user.Id, cancellationToken);
         if (userMemberships.Count == 0)
         {
-            throw new ForbiddenException("This account does not belong to any agency.", "no_agency");
+            throw new ForbiddenException("This account does not belong to any organization.", "no_agency");
         }
 
         // The list is ordered most recently used first, so the first entry is the default.
         var membership = request.AgencyId is { } requested
             ? userMemberships.FirstOrDefault(m => m.AgencyId == requested)
-              ?? throw new ForbiddenException("You are not a member of that agency.", "not_a_member")
+              ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member")
             : userMemberships[0];
 
         await memberships.TouchAsync(membership.AgencyId, user.Id, time.GetUtcNow(), cancellationToken);
@@ -140,7 +148,7 @@ public sealed class AuthService(
         var targetAgencyId = request.AgencyId!.Value;
 
         var membership = await memberships.FindAsync(userId, targetAgencyId, cancellationToken)
-                         ?? throw new ForbiddenException("You are not a member of that agency.", "not_a_member");
+                         ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member");
 
         var now = time.GetUtcNow();
         await memberships.TouchAsync(targetAgencyId, userId, now, cancellationToken);
@@ -168,18 +176,18 @@ public sealed class AuthService(
 
         // The token can outlive a membership by up to its lifetime; the database has the final say.
         var current = all.FirstOrDefault(m => m.AgencyId == agencyId)
-                      ?? throw new UnauthorizedException("You are no longer a member of this agency.", "membership_ended");
+                      ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
         var agency = await agencies.GetAsync(agencyId, userId, cancellationToken)
-                     ?? throw new UnauthorizedException("You are no longer a member of this agency.", "membership_ended");
+                     ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
 
         return new MeResponse(
             new UserDto(user.Id, user.Email, user.FullName),
-            new AgencyDto(agency.Id, agency.Name, agency.Plan),
+            new AgencyDto(agency.Id, agency.Name, agency.BusinessModel, agency.Plan),
             current.Role,
-            all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.Role)).ToList());
+            all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.BusinessModel, m.Role)).ToList());
     }
 
-    private async Task<AuthResult> StartSessionAsync(Guid userId, Guid agencyId, AgencyRole role, CancellationToken cancellationToken)
+    private async Task<AuthResult> StartSessionAsync(Guid userId, Guid agencyId, OrganizationRole role, CancellationToken cancellationToken)
     {
         var (rawToken, token) = NewRefreshToken(userId, agencyId, time.GetUtcNow());
         await refreshTokens.InsertAsync(token, cancellationToken);
@@ -195,7 +203,7 @@ public sealed class AuthService(
         return (raw, stored);
     }
 
-    private AuthResult BuildResult(Guid userId, Guid agencyId, AgencyRole role, string rawRefreshToken, DateTimeOffset refreshExpiresAt)
+    private AuthResult BuildResult(Guid userId, Guid agencyId, OrganizationRole role, string rawRefreshToken, DateTimeOffset refreshExpiresAt)
     {
         var access = accessTokens.Issue(userId, agencyId, role);
         var expiresIn = jwtOptions.Value.AccessTokenMinutes * 60;

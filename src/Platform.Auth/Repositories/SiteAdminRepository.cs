@@ -48,8 +48,8 @@ public sealed class SiteAdminRepository(IDbConnectionFactory connections) : ISit
         {
             var rows = (await connection.QueryAsync<SiteAgencyRecord>(new CommandDefinition(
                 """
-                SELECT id, name, plan, created_at, member_count, workspace_count, total_count
-                FROM site_admin_list_agencies(@limit, @offset)
+                SELECT id, name, business_model, plan, created_at, member_count, workspace_count, total_count
+                FROM site_admin_list_agencies_v2(@limit, @offset)
                 """,
                 new { limit = pageSize, offset = (page - 1) * pageSize },
                 cancellationToken: cancellationToken))).AsList();

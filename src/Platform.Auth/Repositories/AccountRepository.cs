@@ -40,8 +40,8 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                "INSERT INTO agencies (id, name, plan) VALUES (@AgencyId, @AgencyName, @plan)",
-                new { account.AgencyId, account.AgencyName, plan = AgencyPlan.Trial.ToDb() },
+                "INSERT INTO agencies (id, name, business_model, plan) VALUES (@AgencyId, @AgencyName, @businessModel, @plan)",
+                new { account.AgencyId, account.AgencyName, businessModel = account.BusinessModel.ToDb(), plan = AgencyPlan.Trial.ToDb() },
                 transaction,
                 cancellationToken: cancellationToken));
 
@@ -52,8 +52,8 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
                 cancellationToken: cancellationToken));
 
             await connection.ExecuteAsync(new CommandDefinition(
-                "INSERT INTO agency_members (agency_id, user_id, role) VALUES (@AgencyId, @UserId, @role)",
-                new { account.AgencyId, account.UserId, role = AgencyRole.Owner.ToDb() },
+                "INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES (@AgencyId, @UserId, @businessModel, @role)",
+                new { account.AgencyId, account.UserId, businessModel = account.BusinessModel.ToDb(), role = account.Role.ToDb() },
                 transaction,
                 cancellationToken: cancellationToken));
 

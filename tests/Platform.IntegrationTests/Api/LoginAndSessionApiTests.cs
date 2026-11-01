@@ -75,13 +75,13 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task Login_WithoutAnAgencyId_UsesTheMostRecentlyUsedMembership()
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
-        var second = await AddMembershipAsync(registered, "viewer", "Second agency", DateTimeOffset.UtcNow.AddDays(1));
+        var second = await AddMembershipAsync(registered, "clientmanager", "Second agency", DateTimeOffset.UtcNow.AddDays(1));
 
         var session = await Host.LoginAsync(registered.Email);
 
         Assert.Equal(second, session.AgencyId);
         var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", session.AccessToken));
-        Assert.Equal("viewer", me.GetProperty("role").GetString());
+        Assert.Equal("clientmanager", me.GetProperty("role").GetString());
         Assert.Equal("Second agency", me.GetProperty("agency").GetProperty("name").GetString());
     }
 
@@ -89,7 +89,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task Login_WithAnAgencyId_SignsInToThatAgency_AndRemembersTheChoice()
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
-        var second = await AddMembershipAsync(registered, "viewer", "Second agency", DateTimeOffset.UtcNow.AddDays(-1));
+        var second = await AddMembershipAsync(registered, "clientmanager", "Second agency", DateTimeOffset.UtcNow.AddDays(-1));
         await OwnerExecuteAsync(
             "UPDATE agency_members SET last_active_at = now() - interval '2 days' WHERE user_id = @userId AND agency_id = @agencyId",
             new { userId = registered.UserId, agencyId = registered.AgencyId });
@@ -134,7 +134,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task Me_ReturnsTheUserAgencyRoleAndEveryMembership()
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
-        var second = await AddMembershipAsync(registered, "manager", "Second agency");
+        var second = await AddMembershipAsync(registered, "marketingmanager", "Second agency");
 
         var response = await Host.GetAsync("/v1/auth/me", registered.AccessToken);
 
@@ -146,13 +146,13 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         Assert.Equal("Test User", me.GetProperty("user").GetProperty("fullName").GetString());
         Assert.False(me.GetProperty("user").TryGetProperty("passwordHash", out _));
         Assert.Equal(registered.AgencyId, me.GetProperty("agency").GetProperty("id").GetGuid());
-        Assert.Equal("owner", me.GetProperty("role").GetString());
+        Assert.Equal("organizationadmin", me.GetProperty("role").GetString());
 
         var memberships = me.GetProperty("memberships").EnumerateArray()
             .ToDictionary(m => m.GetProperty("agencyId").GetGuid(), m => (m.GetProperty("agencyName").GetString(), m.GetProperty("role").GetString()));
         Assert.Equal(2, memberships.Count);
-        Assert.Equal(("First agency", "owner"), memberships[registered.AgencyId]);
-        Assert.Equal(("Second agency", "manager"), memberships[second]);
+        Assert.Equal(("First agency", "organizationadmin"), memberships[registered.AgencyId]);
+        Assert.Equal(("Second agency", "marketingmanager"), memberships[second]);
     }
 
     [Fact]
@@ -160,7 +160,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     {
         var ana = await Host.RegisterAsync();
         var bob = await Host.RegisterAsync(agencyName: "Bob only");
-        await AddMembershipAsync(bob, "viewer", "Bob's second");
+        await AddMembershipAsync(bob, "clientmanager", "Bob's second");
 
         var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", ana.AccessToken));
 
@@ -173,11 +173,11 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     {
         var registered = await Host.RegisterAsync();
         await OwnerExecuteAsync(
-            "UPDATE agency_members SET role = 'viewer' WHERE user_id = @userId", new { userId = registered.UserId });
+            "UPDATE agency_members SET role = 'clientmanager' WHERE user_id = @userId", new { userId = registered.UserId });
 
         var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", registered.AccessToken));
 
-        Assert.Equal("viewer", me.GetProperty("role").GetString());
+        Assert.Equal("clientmanager", me.GetProperty("role").GetString());
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task SwitchAgency_IssuesTokensForTheOtherAgency_WithThatRole()
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
-        var second = await AddMembershipAsync(registered, "viewer", "Second agency");
+        var second = await AddMembershipAsync(registered, "clientmanager", "Second agency");
 
         var response = await Host.PostAsync(
             "/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
@@ -256,7 +256,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         var body = await ApiTestHost.ReadJsonAsync(response);
         var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", body.GetProperty("accessToken").GetString()));
         Assert.Equal(second, me.GetProperty("agency").GetProperty("id").GetGuid());
-        Assert.Equal("viewer", me.GetProperty("role").GetString());
+        Assert.Equal("clientmanager", me.GetProperty("role").GetString());
         Assert.NotEqual(registered.RefreshToken, ApiTestHost.RefreshCookieValue(response));
     }
 
@@ -264,7 +264,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task SwitchAgency_ReplacesTheRefreshCookie_AndEndsTheOldAgencysToken()
     {
         var registered = await Host.RegisterAsync();
-        var second = await AddMembershipAsync(registered, "manager");
+        var second = await AddMembershipAsync(registered, "marketingmanager");
 
         var response = await Host.PostAsync(
             "/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
@@ -280,7 +280,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     public async Task SwitchAgency_TheNewAgencyBecomesTheDefaultForTheNextLogin()
     {
         var registered = await Host.RegisterAsync();
-        var second = await AddMembershipAsync(registered, "manager", lastActiveAt: DateTimeOffset.UtcNow.AddDays(-30));
+        var second = await AddMembershipAsync(registered, "marketingmanager", lastActiveAt: DateTimeOffset.UtcNow.AddDays(-30));
 
         await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
 
@@ -328,7 +328,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     {
         var ana = await Host.RegisterAsync();
         var bob = await Host.RegisterAsync();
-        var second = await AddMembershipAsync(ana, "viewer");
+        var second = await AddMembershipAsync(ana, "clientmanager");
 
         // Ana presents Bob's cookie by mistake or on purpose: it is not hers, so it is left alone.
         await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, ana.AccessToken, bob.RefreshToken);

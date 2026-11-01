@@ -10,21 +10,26 @@ namespace Platform.Auth.Services;
 /// </summary>
 public static class RolePermissions
 {
-    /// <summary>Owners, admins and managers change data; viewers only read.</summary>
-    public static bool CanWrite(this AgencyRole role) => role != AgencyRole.Viewer;
+    /// <summary>
+    /// Everyone who is a member reads. A client manager reads but does not change data: their work
+    /// (relationships, feedback, approvals) gets its own rule when those features exist.
+    /// </summary>
+    public static bool CanRead(this OrganizationRole role) => Enum.IsDefined(role);
 
-    /// <summary>Owners and admins manage the agency: its members and its workspaces.</summary>
-    public static bool CanManage(this AgencyRole role) => role is AgencyRole.Owner or AgencyRole.Admin;
+    /// <summary>Organization admins, marketing managers and content writers change data.</summary>
+    public static bool CanWrite(this OrganizationRole role) =>
+        role is OrganizationRole.OrganizationAdmin or OrganizationRole.MarketingManager or OrganizationRole.ContentWriter;
 
-    public static bool CanRead(this AgencyRole role) => Enum.IsDefined(role);
+    /// <summary>Only organization admins manage the organization: its members and its workspaces.</summary>
+    public static bool CanManage(this OrganizationRole role) => role is OrganizationRole.OrganizationAdmin;
 
     /// <summary>
     /// Reads a role from its stored lower-case name, such as the token's role claim. Strict on purpose:
     /// anything but the exact name, including a number, is not a role.
     /// </summary>
-    public static bool TryParse([NotNullWhen(true)] string? value, out AgencyRole role)
+    public static bool TryParse([NotNullWhen(true)] string? value, out OrganizationRole role)
     {
-        foreach (var candidate in Enum.GetValues<AgencyRole>())
+        foreach (var candidate in Enum.GetValues<OrganizationRole>())
         {
             if (value == candidate.ToDb())
             {
@@ -38,6 +43,6 @@ public static class RolePermissions
     }
 
     /// <summary>The stored names of every role that passes <paramref name="allowed"/>.</summary>
-    public static string[] NamesWhere(Func<AgencyRole, bool> allowed) =>
-        Enum.GetValues<AgencyRole>().Where(allowed).Select(role => role.ToDb()).ToArray();
+    public static string[] NamesWhere(Func<OrganizationRole, bool> allowed) =>
+        Enum.GetValues<OrganizationRole>().Where(allowed).Select(role => role.ToDb()).ToArray();
 }

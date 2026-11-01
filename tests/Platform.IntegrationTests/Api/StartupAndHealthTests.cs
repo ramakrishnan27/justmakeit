@@ -187,7 +187,7 @@ public sealed class HealthAndHostingTests
     {
         using var factory = new ApiHostFactory(ApiHostFactory.ValidSettings());
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), AgencyRole.Viewer));
+        client.DefaultRequestHeaders.Authorization = new("Bearer", factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), OrganizationRole.ClientManager));
 
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/v1/does-not-exist")).StatusCode);
     }

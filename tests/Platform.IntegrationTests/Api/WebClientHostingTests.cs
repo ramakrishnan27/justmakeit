@@ -70,7 +70,7 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     public async Task ASignedInAgencyUser_GetsA404_ForAnUnknownApiRoute_NotTheShell()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/v1/site/overviw");
-        request.Headers.Authorization = new("Bearer", _host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), AgencyRole.Viewer));
+        request.Headers.Authorization = new("Bearer", _host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), OrganizationRole.ClientManager));
 
         var response = await _host.Client.SendAsync(request);
 
@@ -172,9 +172,9 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData(AgencyRole.Owner)]
-    [InlineData(AgencyRole.Viewer)]
-    public async Task TheAppShell_IsTheSame_ForASignedInUser(AgencyRole role)
+    [InlineData(OrganizationRole.OrganizationAdmin)]
+    [InlineData(OrganizationRole.ClientManager)]
+    public async Task TheAppShell_IsTheSame_ForASignedInUser(OrganizationRole role)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/admin/login");
         request.Headers.Authorization = new("Bearer", _host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), role));

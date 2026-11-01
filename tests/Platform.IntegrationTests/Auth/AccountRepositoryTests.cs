@@ -2,6 +2,8 @@ using Dapper;
 using Npgsql;
 using Platform.Auth.Models;
 using Platform.Auth.Repositories;
+using Platform.Auth.Services;
+using Platform.Helpers.Constants;
 using Platform.Infrastructure.Data;
 using Platform.IntegrationTests.Infrastructure;
 
@@ -27,8 +29,12 @@ public sealed class AccountRepositoryTests(PostgresFixture postgres) : IAsyncLif
 
     public async Task DisposeAsync() => await _db.DisposeAsync();
 
-    private static NewAccount Account(string email = "ana@example.com", string agencyName = "Acme", string hash = "pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==") =>
-        new(Guid.NewGuid(), email, hash, "Ana Smith", Guid.NewGuid(), agencyName, Guid.NewGuid(), "Main workspace");
+    private static NewAccount Account(
+        string email = "ana@example.com",
+        string agencyName = "Acme",
+        string hash = "pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==",
+        BusinessModel model = BusinessModel.Agency) =>
+        new(Guid.NewGuid(), email, hash, "Ana Smith", Guid.NewGuid(), agencyName, model, model.FounderRole(), Guid.NewGuid(), "Main workspace");
 
     private async Task<long> CountAsync(string table)
     {
@@ -57,11 +63,48 @@ public sealed class AccountRepositoryTests(PostgresFixture postgres) : IAsyncLif
         var role = await owner.QuerySingleAsync<string>(
             "SELECT role FROM agency_members WHERE agency_id = @agencyId AND user_id = @userId",
             new { agencyId = account.AgencyId, userId = account.UserId });
-        Assert.Equal("owner", role);
+        Assert.Equal("organizationadmin", role);
 
         var workspace = await owner.QuerySingleAsync<(Guid AgencyId, string Name)>(
             "SELECT agency_id, name FROM workspaces WHERE id = @id", new { id = account.WorkspaceId });
         Assert.Equal((account.AgencyId, "Main workspace"), workspace);
+    }
+
+    [Theory]
+    [InlineData(BusinessModel.Company, "company", "organizationadmin")]
+    [InlineData(BusinessModel.Agency, "agency", "organizationadmin")]
+    [InlineData(BusinessModel.Creator, "creator", "contentwriter")]
+    public async Task CreateAccount_StoresTheBusinessModel_OnTheOrganizationAndOnTheFoundersMembership(
+        BusinessModel model, string storedModel, string storedRole)
+    {
+        var account = Account(model: model);
+
+        Assert.True(await _repository.CreateAccountAsync(account, CancellationToken.None));
+
+        await using var owner = await _db.OpenOwnerAsync();
+        Assert.Equal(storedModel, await owner.QuerySingleAsync<string>(
+            "SELECT business_model FROM agencies WHERE id = @id", new { id = account.AgencyId }));
+        Assert.Equal((storedModel, storedRole), await owner.QuerySingleAsync<(string, string)>(
+            "SELECT business_model, role FROM agency_members WHERE agency_id = @id", new { id = account.AgencyId }));
+    }
+
+    [Theory]
+    [InlineData(BusinessModel.Creator, OrganizationRole.OrganizationAdmin)]
+    [InlineData(BusinessModel.Creator, OrganizationRole.MarketingManager)]
+    [InlineData(BusinessModel.Creator, OrganizationRole.ClientManager)]
+    [InlineData(BusinessModel.Company, OrganizationRole.ClientManager)]
+    public async Task CreateAccount_WithARoleTheModelDoesNotAllow_IsRefusedByTheDatabase_AndCreatesNothing(
+        BusinessModel model, OrganizationRole role)
+    {
+        var broken = Account(model: model) with { Role = role };
+
+        var exception = await Assert.ThrowsAsync<PostgresException>(() => _repository.CreateAccountAsync(broken, CancellationToken.None));
+
+        Assert.Equal(PostgresErrorCodes.CheckViolation, exception.SqlState);
+        Assert.Equal("ck_agency_members_role_model", exception.ConstraintName);
+        Assert.Equal(0, await CountAsync("agencies"));
+        Assert.Equal(0, await CountAsync("users"));
+        Assert.Equal(0, await CountAsync("workspaces"));
     }
 
     [Fact]

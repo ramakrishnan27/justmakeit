@@ -7,7 +7,7 @@ using Platform.Helpers.Tenancy;
 
 namespace Platform.Auth.Services;
 
-/// <summary>The site admin dashboard: platform totals and a page of every agency.</summary>
+/// <summary>The site admin dashboard: platform totals and a page of every organization.</summary>
 public sealed class SiteAdminDashboardService(ISiteAdminRepository siteAdmins, ITenantContext tenant) : ISiteAdminDashboardService
 {
     public async Task<SiteOverviewResponse> GetOverviewAsync(CancellationToken cancellationToken)
@@ -34,7 +34,7 @@ public sealed class SiteAdminDashboardService(ISiteAdminRepository siteAdmins, I
         return new PagedResult<SiteAgencyResponse>
         {
             Items = result.Items
-                .Select(a => new SiteAgencyResponse(a.Id, a.Name, a.Plan, a.CreatedAt, a.MemberCount, a.WorkspaceCount))
+                .Select(a => new SiteAgencyResponse(a.Id, a.Name, a.BusinessModel, a.Plan, a.CreatedAt, a.MemberCount, a.WorkspaceCount))
                 .ToList(),
             Page = query.Page,
             PageSize = query.PageSize,

@@ -9,6 +9,7 @@ namespace Platform.Auth.Services;
 
 public sealed class WorkspaceService(
     IWorkspaceRepository workspaces,
+    IAgencyRepository agencies,
     ITenantContext tenant,
     TimeProvider time,
     ILogger<WorkspaceService> logger) : IWorkspaceService
@@ -30,7 +31,17 @@ public sealed class WorkspaceService(
         // here so no other caller of the service can skip it.
         if (!RolePermissions.TryParse(tenant.Role, out var role) || !role.CanManage())
         {
-            throw new ForbiddenException("Only owners and admins can create workspaces.", "insufficient_role");
+            throw new ForbiddenException("Only organization admins can create workspaces.", "insufficient_role");
+        }
+
+        // An individual creator has the one workspace made at sign-up. No role reaches this point for a
+        // creator today; the rule is checked on its own so it still holds if the role rules change.
+        var agency = await agencies.GetAsync(agencyId, userId, cancellationToken)
+                     ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
+        if (!agency.BusinessModel.AllowsSeveralWorkspaces()
+            && (await workspaces.ListAsync(agencyId, userId, cancellationToken)).Count > 0)
+        {
+            throw new ConflictException("An individual creator has one workspace.", "workspace_limit");
         }
 
         var workspace = new WorkspaceRecord
@@ -42,7 +53,7 @@ public sealed class WorkspaceService(
         };
         await workspaces.InsertAsync(workspace, userId, cancellationToken);
 
-        logger.LogInformation("User {UserId} created workspace {WorkspaceId} in agency {AgencyId}", userId, workspace.Id, agencyId);
+        logger.LogInformation("User {UserId} created workspace {WorkspaceId} in organization {AgencyId}", userId, workspace.Id, agencyId);
         return ToResponse(workspace);
     }
 

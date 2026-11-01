@@ -1,11 +1,11 @@
 import { h, replaceChildren } from '../core/dom.js';
-import { countLabel, formatDate, formatNumber, pageSummary, planLabel } from '../core/format.js';
+import { businessModelLabel, countLabel, formatDate, formatNumber, pageSummary, planLabel } from '../core/format.js';
 import { messageForLoadError } from '../core/messages.js';
 
 const pageSize = 10;
 
 /**
- * The site admin dashboard: platform totals, a page of every agency, and the claims of the current
+ * The site admin dashboard: platform totals, a page of every organization, and the claims of the current
  * access token. The router gives it `context = { api, session }` before it is attached.
  */
 class AdminDashboard extends HTMLElement {
@@ -39,9 +39,9 @@ class AdminDashboard extends HTMLElement {
         'main',
         { id: 'main', class: 'container page' },
         h('h1', { tabindex: '-1' }, 'Dashboard'),
-        h('p', { class: 'muted' }, 'A view across every agency on the platform.'),
+        h('p', { class: 'muted' }, 'A view across every organization on the platform.'),
         h('section', { 'aria-labelledby': 'overview-title' }, h('h2', { id: 'overview-title' }, 'Overview'), this.overviewRegion),
-        h('section', { 'aria-labelledby': 'agencies-title' }, h('h2', { id: 'agencies-title' }, 'Agencies'), this.agenciesRegion),
+        h('section', { 'aria-labelledby': 'agencies-title' }, h('h2', { id: 'agencies-title' }, 'Organizations'), this.agenciesRegion),
         h('section', { 'aria-labelledby': 'session-title' }, h('h2', { id: 'session-title' }, 'Your session'), this.sessionRegion),
       ),
     );
@@ -84,7 +84,7 @@ class AdminDashboard extends HTMLElement {
       );
 
     return [
-      tile('Agencies', overview.agencies, `${formatNumber(overview.trialAgencies)} trial · ${formatNumber(overview.paidAgencies)} paid`),
+      tile('Organizations', overview.agencies, `${formatNumber(overview.trialAgencies)} trial · ${formatNumber(overview.paidAgencies)} paid`),
       tile('Users', overview.users),
       tile('Workspaces', overview.workspaces),
       tile('Memberships', overview.memberships),
@@ -96,7 +96,7 @@ class AdminDashboard extends HTMLElement {
     refresh.addEventListener('click', () => this.load());
 
     if (result.items.length === 0 && result.totalCount === 0) {
-      return h('div', { class: 'notice' }, h('p', {}, 'No agencies yet. They appear here as people register.'), refresh);
+      return h('div', { class: 'notice' }, h('p', {}, 'No organizations yet. They appear here as people register.'), refresh);
     }
 
     const rows = result.items.map((agency) =>
@@ -104,7 +104,12 @@ class AdminDashboard extends HTMLElement {
         'li',
         { class: 'agency' },
         h('h3', { class: 'agency-name' }, agency.name),
-        h('span', { class: `badge badge-${agency.plan === 'paid' ? 'paid' : 'trial'}` }, planLabel(agency.plan)),
+        h(
+          'div',
+          { class: 'agency-badges' },
+          h('span', { class: 'badge badge-model' }, businessModelLabel(agency.businessModel)),
+          h('span', { class: `badge badge-${agency.plan === 'paid' ? 'paid' : 'trial'}` }, planLabel(agency.plan)),
+        ),
         h(
           'dl',
           { class: 'agency-facts' },
@@ -126,7 +131,7 @@ class AdminDashboard extends HTMLElement {
       h('ul', { class: 'agency-list' }, rows),
       h(
         'nav',
-        { class: 'pager', 'aria-label': 'Agency pages' },
+        { class: 'pager', 'aria-label': 'Organization pages' },
         previous,
         h('p', { class: 'pager-summary' }, pageSummary(result.page, result.pageSize, result.totalCount), ' · ', countLabel(result.totalPages, 'page')),
         next,

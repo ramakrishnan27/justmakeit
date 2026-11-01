@@ -59,6 +59,17 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// </summary>
     public async Task<TestDatabase> CreateDatabaseWithLimitedOwnerAsync()
     {
+        var database = await CreateEmptyDatabaseWithLimitedOwnerAsync();
+        await database.MigrateAsync();
+        return database;
+    }
+
+    /// <summary>
+    /// The limited-owner database of <see cref="CreateDatabaseWithLimitedOwnerAsync"/>, with nothing applied
+    /// yet, for tests that start from an older schema and migrate it themselves.
+    /// </summary>
+    public async Task<TestDatabase> CreateEmptyDatabaseWithLimitedOwnerAsync()
+    {
         const string role = "test_limited_owner";
         var name = "test_" + Guid.NewGuid().ToString("N");
         var password = TokenGenerator.Create();
@@ -107,9 +118,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         };
         var app = new NpgsqlConnectionStringBuilder(owner.ConnectionString) { Username = "app_user", Password = _appPassword };
 
-        var database = new TestDatabase(name, AdminConnectionString, owner.ConnectionString, app.ConnectionString);
-        await database.MigrateAsync();
-        return database;
+        return new TestDatabase(name, AdminConnectionString, owner.ConnectionString, app.ConnectionString);
     }
 
     /// <summary>Creates a database with nothing in it, for tests that exercise the migrator itself.</summary>

@@ -370,8 +370,8 @@ public sealed class SiteAdminAuthServiceTests
     }
 
     [Theory]
-    [InlineData("owner")]
-    [InlineData("viewer")]
+    [InlineData("organizationadmin")]
+    [InlineData("clientmanager")]
     [InlineData(null)]
     public async Task GetMe_ForATokenThatIsNotASiteAdminToken_IsUnauthorized(string? role)
     {

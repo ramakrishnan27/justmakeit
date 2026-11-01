@@ -50,7 +50,7 @@ public sealed class JwtAuthenticationTests : IDisposable
             {
                 [ClaimNames.UserId] = _userId.ToString(),
                 [ClaimNames.AgencyId] = _agencyId.ToString(),
-                [ClaimNames.Role] = "admin"
+                [ClaimNames.Role] = "organizationadmin"
             },
             SigningCredentials = new SigningCredentials(
                 new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key ?? _key)), algorithm)
@@ -78,8 +78,8 @@ public sealed class JwtAuthenticationTests : IDisposable
         var principal = result.Principal!;
         Assert.Equal(_userId.ToString(), principal.FindFirstValue(ClaimNames.UserId));
         Assert.Equal(_agencyId.ToString(), principal.FindFirstValue(ClaimNames.AgencyId));
-        Assert.Equal("admin", principal.FindFirstValue(ClaimNames.Role));
-        Assert.True(principal.IsInRole("admin"));
+        Assert.Equal("organizationadmin", principal.FindFirstValue(ClaimNames.Role));
+        Assert.True(principal.IsInRole("organizationadmin"));
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class JwtAuthenticationTests : IDisposable
     public async Task AnUnsignedToken_IsRejected()
     {
         var unsigned = new JsonWebTokenHandler().CreateToken(
-            $$"""{"iss":"{{Issuer}}","aud":"{{Audience}}","user_id":"{{_userId}}","agency_id":"{{_agencyId}}","role":"owner","exp":{{DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds()}}}""");
+            $$"""{"iss":"{{Issuer}}","aud":"{{Audience}}","user_id":"{{_userId}}","agency_id":"{{_agencyId}}","role":"organizationadmin","exp":{{DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds()}}}""");
 
         Assert.False((await AuthenticateAsync(unsigned)).Succeeded);
     }

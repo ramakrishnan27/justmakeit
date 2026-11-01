@@ -34,7 +34,7 @@ public sealed class AuthServiceTests
 
     public AuthServiceTests()
     {
-        _accessTokens.Issue(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<AgencyRole>())
+        _accessTokens.Issue(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<OrganizationRole>())
             .Returns(call => new AccessToken("access-token", _time.Now.AddMinutes(15)));
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(true);
         _refreshTokens.RotateAsync(Arg.Any<Guid>(), Arg.Any<NewRefreshToken>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
@@ -45,8 +45,8 @@ public sealed class AuthServiceTests
             _tenant, Options.Create(_jwt), _time, NullLogger<AuthService>.Instance);
     }
 
-    private static RegisterRequest ValidRegistration() =>
-        new("  Ana@Example.COM ", Password, " Ana Smith ", " Acme Agency ", null);
+    private static RegisterRequest ValidRegistration(string businessModel = "agency") =>
+        new("  Ana@Example.COM ", Password, " Ana Smith ", " Acme Agency ", businessModel, null);
 
     private UserLoginRecord StoredUser(string password = Password) => new()
     {
@@ -56,8 +56,9 @@ public sealed class AuthServiceTests
         PasswordHash = _hasher.Hash(password)
     };
 
-    private static MembershipRecord Membership(Guid agencyId, AgencyRole role, string name = "Agency") =>
-        new() { AgencyId = agencyId, AgencyName = name, Role = role };
+    private static MembershipRecord Membership(
+        Guid agencyId, OrganizationRole role, string name = "Agency", BusinessModel businessModel = BusinessModel.Agency) =>
+        new() { AgencyId = agencyId, AgencyName = name, BusinessModel = businessModel, Role = role };
 
     private void GivenUser(UserLoginRecord? user) =>
         _accounts.FindLoginByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(user);
@@ -84,7 +85,7 @@ public sealed class AuthServiceTests
         return record;
     }
 
-    private void GivenMembership(AgencyRole role) =>
+    private void GivenMembership(OrganizationRole role) =>
         _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>()).Returns(Membership(_agencyId, role));
 
     private static async Task<T> AssertThrowsAsync<T>(Func<Task> action) where T : AppException =>
@@ -134,18 +135,42 @@ public sealed class AuthServiceTests
         Assert.Equal("Client one", created!.WorkspaceName);
     }
 
-    [Fact]
-    public async Task Register_SignsTheNewOwnerIn_WithAnOwnerRoleTokenForTheNewAgency()
+    [Theory]
+    [InlineData("company", BusinessModel.Company, OrganizationRole.OrganizationAdmin)]
+    [InlineData("agency", BusinessModel.Agency, OrganizationRole.OrganizationAdmin)]
+    [InlineData("creator", BusinessModel.Creator, OrganizationRole.ContentWriter)]
+    public async Task Register_SignsTheFounderIn_WithTheFounderRoleOfTheChosenModel_ForTheNewOrganization(
+        string text, BusinessModel model, OrganizationRole founderRole)
     {
         NewAccount? created = null;
         _accounts.CreateAccountAsync(Arg.Do<NewAccount>(account => created = account), Arg.Any<CancellationToken>()).Returns(true);
 
-        var result = await _service.RegisterAsync(ValidRegistration(), CancellationToken.None);
+        var result = await _service.RegisterAsync(ValidRegistration(text), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(created!.UserId, created.AgencyId, AgencyRole.Owner);
+        Assert.Equal(model, created!.BusinessModel);
+        Assert.Equal(founderRole, created.Role);
+        Assert.True(created.BusinessModel.IsAllowed(created.Role));
+        _accessTokens.Received(1).Issue(created.UserId, created.AgencyId, founderRole);
         Assert.Equal("access-token", result.Tokens.AccessToken);
         Assert.Equal("Bearer", result.Tokens.TokenType);
         Assert.Equal(15 * 60, result.Tokens.ExpiresIn);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Company")]
+    [InlineData("individual")]
+    [InlineData("1")]
+    public async Task Register_WithoutAKnownBusinessModel_IsABadRequest_AndCreatesNothing(string? businessModel)
+    {
+        var request = ValidRegistration() with { BusinessModel = businessModel };
+
+        var exception = await AssertThrowsAsync<BadRequestException>(() => _service.RegisterAsync(request, CancellationToken.None));
+
+        Assert.Equal(["businessModel"], exception.Errors!.Keys);
+        await _accounts.DidNotReceiveWithAnyArgs().CreateAccountAsync(default!, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
     }
 
     [Fact]
@@ -190,14 +215,15 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task Register_WithInvalidInput_ReportsEveryBadField_AndTouchesNothing()
     {
-        var request = new RegisterRequest("not an email", "short", null, " ", null);
+        var request = new RegisterRequest("not an email", "short", null, " ", "nope", null);
 
         var exception = await AssertThrowsAsync<BadRequestException>(() => _service.RegisterAsync(request, CancellationToken.None));
 
         Assert.Equal(400, exception.StatusCode);
         Assert.Contains("email", exception.Errors!.Keys);
         Assert.Contains("password", exception.Errors.Keys);
-        Assert.Contains("agencyName", exception.Errors.Keys);
+        Assert.Contains("organizationName", exception.Errors.Keys);
+        Assert.Contains("businessModel", exception.Errors.Keys);
         await _accounts.DidNotReceiveWithAnyArgs().CreateAccountAsync(default!, default);
     }
 
@@ -208,11 +234,11 @@ public sealed class AuthServiceTests
     {
         var recent = Guid.NewGuid();
         GivenUser(StoredUser());
-        GivenMemberships(Membership(recent, AgencyRole.Manager), Membership(_agencyId, AgencyRole.Owner));
+        GivenMemberships(Membership(recent, OrganizationRole.MarketingManager), Membership(_agencyId, OrganizationRole.OrganizationAdmin));
 
         var result = await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, recent, AgencyRole.Manager);
+        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager);
         Assert.Equal("access-token", result.Tokens.AccessToken);
         await _memberships.Received(1).TouchAsync(recent, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
@@ -222,18 +248,18 @@ public sealed class AuthServiceTests
     {
         var other = Guid.NewGuid();
         GivenUser(StoredUser());
-        GivenMemberships(Membership(_agencyId, AgencyRole.Owner), Membership(other, AgencyRole.Viewer));
+        GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin), Membership(other, OrganizationRole.ClientManager));
 
         await _service.LoginAsync(new LoginRequest("ana@example.com", Password, other), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, other, AgencyRole.Viewer);
+        _accessTokens.Received(1).Issue(_userId, other, OrganizationRole.ClientManager);
     }
 
     [Fact]
     public async Task Login_WithAnAgencyTheUserDoesNotBelongTo_IsForbidden_AndIssuesNothing()
     {
         GivenUser(StoredUser());
-        GivenMemberships(Membership(_agencyId, AgencyRole.Owner));
+        GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin));
 
         var exception = await AssertThrowsAsync<ForbiddenException>(() =>
             _service.LoginAsync(new LoginRequest("ana@example.com", Password, Guid.NewGuid()), CancellationToken.None));
@@ -248,7 +274,7 @@ public sealed class AuthServiceTests
         NewRefreshToken? stored = null;
         await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
         GivenUser(StoredUser());
-        GivenMemberships(Membership(_agencyId, AgencyRole.Owner));
+        GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin));
 
         var result = await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
 
@@ -260,7 +286,7 @@ public sealed class AuthServiceTests
     public async Task Login_WithTheWrongPassword_IsRejected_BeforeAnythingElseIsLoaded()
     {
         GivenUser(StoredUser());
-        GivenMemberships(Membership(_agencyId, AgencyRole.Owner));
+        GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin));
 
         var exception = await AssertThrowsAsync<UnauthorizedException>(() =>
             _service.LoginAsync(new LoginRequest("ana@example.com", "the wrong password", null), CancellationToken.None));
@@ -344,7 +370,7 @@ public sealed class AuthServiceTests
     {
         const string presented = "the-presented-token";
         var record = GivenStoredRefreshToken(presented);
-        GivenMembership(AgencyRole.Admin);
+        GivenMembership(OrganizationRole.ContentWriter);
         NewRefreshToken? replacement = null;
         _refreshTokens.RotateAsync(
                 record.Id, Arg.Do<NewRefreshToken>(token => replacement = token), _time.Now, Arg.Any<CancellationToken>())
@@ -358,7 +384,7 @@ public sealed class AuthServiceTests
         Assert.Equal(_userId, replacement.UserId);
         Assert.Equal(_agencyId, replacement.AgencyId);
         Assert.Equal(_time.Now.AddDays(30), result.RefreshTokenExpiresAt);
-        _accessTokens.Received(1).Issue(_userId, _agencyId, AgencyRole.Admin);
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ContentWriter);
         await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
     }
 
@@ -367,7 +393,7 @@ public sealed class AuthServiceTests
     {
         const string presented = "the-presented-token";
         GivenStoredRefreshToken(presented);
-        GivenMembership(AgencyRole.Owner);
+        GivenMembership(OrganizationRole.OrganizationAdmin);
 
         await _service.RefreshAsync(presented, CancellationToken.None);
 
@@ -379,11 +405,11 @@ public sealed class AuthServiceTests
     public async Task Refresh_TakesTheRoleFromTheDatabase_SoAChangedRoleAppliesAtOnce()
     {
         GivenStoredRefreshToken("token");
-        GivenMembership(AgencyRole.Viewer);
+        GivenMembership(OrganizationRole.ClientManager);
 
         await _service.RefreshAsync("token", CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, _agencyId, AgencyRole.Viewer);
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ClientManager);
     }
 
     [Theory]
@@ -422,7 +448,7 @@ public sealed class AuthServiceTests
     public async Task Refresh_WithAnExpiredToken_IsUnauthorized_AndRotatesNothing()
     {
         GivenStoredRefreshToken("expired", expiresAt: _time.Now.AddSeconds(-1));
-        GivenMembership(AgencyRole.Owner);
+        GivenMembership(OrganizationRole.OrganizationAdmin);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("expired", CancellationToken.None));
 
@@ -434,7 +460,7 @@ public sealed class AuthServiceTests
     public async Task Refresh_WithATokenExpiringExactlyNow_IsUnauthorized()
     {
         GivenStoredRefreshToken("edge", expiresAt: _time.Now);
-        GivenMembership(AgencyRole.Owner);
+        GivenMembership(OrganizationRole.OrganizationAdmin);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("edge", CancellationToken.None));
     }
@@ -443,7 +469,7 @@ public sealed class AuthServiceTests
     public async Task Refresh_WithARevokedToken_IsReuse_AndRevokesEveryTokenOfThatUserForThatAgency()
     {
         GivenStoredRefreshToken("stolen", revokedAt: _time.Now.AddMinutes(-5));
-        GivenMembership(AgencyRole.Owner);
+        GivenMembership(OrganizationRole.OrganizationAdmin);
 
         var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("stolen", CancellationToken.None));
 
@@ -467,7 +493,7 @@ public sealed class AuthServiceTests
     public async Task Refresh_WhenTwoRequestsRaceForTheSameToken_TheLoserIsTreatedAsReuse()
     {
         var record = GivenStoredRefreshToken("raced");
-        GivenMembership(AgencyRole.Owner);
+        GivenMembership(OrganizationRole.OrganizationAdmin);
         _refreshTokens.RotateAsync(record.Id, Arg.Any<NewRefreshToken>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(false);
 
@@ -537,12 +563,12 @@ public sealed class AuthServiceTests
     public async Task SwitchAgency_ToAnAgencyTheUserBelongsTo_IssuesTokensWithThatRole()
     {
         var target = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "owner");
-        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, AgencyRole.Viewer));
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.ClientManager));
 
         var result = await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), null, CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, target, AgencyRole.Viewer);
+        _accessTokens.Received(1).Issue(_userId, target, OrganizationRole.ClientManager);
         Assert.Equal("access-token", result.Tokens.AccessToken);
         await _memberships.Received(1).TouchAsync(target, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
@@ -551,8 +577,8 @@ public sealed class AuthServiceTests
     public async Task SwitchAgency_StoresANewRefreshTokenForTheTargetAgency_AndRevokesTheOldOne()
     {
         var target = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "owner");
-        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, AgencyRole.Manager));
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.MarketingManager));
         var current = GivenStoredRefreshToken("current-cookie");
         NewRefreshToken? stored = null;
         await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
@@ -569,8 +595,8 @@ public sealed class AuthServiceTests
     public async Task SwitchAgency_NeverRevokesAnotherUsersRefreshToken()
     {
         var target = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "owner");
-        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, AgencyRole.Manager));
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.MarketingManager));
         GivenStoredRefreshToken("someone-elses", userId: Guid.NewGuid());
 
         await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), "someone-elses", CancellationToken.None);
@@ -581,7 +607,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task SwitchAgency_ToAnAgencyTheUserDoesNotBelongTo_IsForbidden_AndIssuesNothing()
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         _memberships.FindAsync(_userId, Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((MembershipRecord?)null);
 
         var exception = await AssertThrowsAsync<ForbiddenException>(() =>
@@ -604,7 +630,7 @@ public sealed class AuthServiceTests
     [InlineData(true)]
     public async Task SwitchAgency_WithoutAnAgencyId_IsABadRequest(bool emptyGuid)
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
 
         await Assert.ThrowsAsync<BadRequestException>(() =>
             _service.SwitchAgencyAsync(new SwitchAgencyRequest(emptyGuid ? Guid.Empty : null), null, CancellationToken.None));
@@ -616,40 +642,45 @@ public sealed class AuthServiceTests
     public async Task GetMe_ReturnsTheUserCurrentAgencyRoleAndEveryMembership()
     {
         var other = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>())
             .Returns(new UserRecord { Id = _userId, Email = "ana@example.com", FullName = "Ana Smith" });
-        GivenMemberships(Membership(_agencyId, AgencyRole.Admin, "Acme"), Membership(other, AgencyRole.Viewer, "Other"));
+        GivenMemberships(
+            Membership(_agencyId, OrganizationRole.ContentWriter, "Acme", BusinessModel.Company),
+            Membership(other, OrganizationRole.ClientManager, "Other", BusinessModel.Agency));
         _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>())
-            .Returns(new AgencyRecord { Id = _agencyId, Name = "Acme", Plan = AgencyPlan.Trial });
+            .Returns(new AgencyRecord { Id = _agencyId, Name = "Acme", BusinessModel = BusinessModel.Company, Plan = AgencyPlan.Trial });
 
         var me = await _service.GetMeAsync(CancellationToken.None);
 
         Assert.Equal(new UserDto(_userId, "ana@example.com", "Ana Smith"), me.User);
-        Assert.Equal(new AgencyDto(_agencyId, "Acme", AgencyPlan.Trial), me.Agency);
-        Assert.Equal(AgencyRole.Admin, me.Role);
+        Assert.Equal(new AgencyDto(_agencyId, "Acme", BusinessModel.Company, AgencyPlan.Trial), me.Agency);
+        Assert.Equal(OrganizationRole.ContentWriter, me.Role);
         Assert.Equal(
-            [new MembershipDto(_agencyId, "Acme", AgencyRole.Admin), new MembershipDto(other, "Other", AgencyRole.Viewer)],
+            [
+                new MembershipDto(_agencyId, "Acme", BusinessModel.Company, OrganizationRole.ContentWriter),
+                new MembershipDto(other, "Other", BusinessModel.Agency, OrganizationRole.ClientManager)
+            ],
             me.Memberships);
     }
 
     [Fact]
     public async Task GetMe_TakesTheRoleFromTheDatabase_NotFromTheToken()
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>()).Returns(new UserRecord { Id = _userId });
-        GivenMemberships(Membership(_agencyId, AgencyRole.Viewer));
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ClientManager));
         _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(new AgencyRecord { Id = _agencyId });
 
-        Assert.Equal(AgencyRole.Viewer, (await _service.GetMeAsync(CancellationToken.None)).Role);
+        Assert.Equal(OrganizationRole.ClientManager, (await _service.GetMeAsync(CancellationToken.None)).Role);
     }
 
     [Fact]
     public async Task GetMe_AfterTheMembershipEnded_IsUnauthorized()
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>()).Returns(new UserRecord { Id = _userId });
-        GivenMemberships(Membership(Guid.NewGuid(), AgencyRole.Owner));
+        GivenMemberships(Membership(Guid.NewGuid(), OrganizationRole.OrganizationAdmin));
 
         var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.GetMeAsync(CancellationToken.None));
 
@@ -659,7 +690,7 @@ public sealed class AuthServiceTests
     [Fact]
     public async Task GetMe_ForADeletedUser_IsUnauthorized()
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>()).Returns((UserRecord?)null);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.GetMeAsync(CancellationToken.None));

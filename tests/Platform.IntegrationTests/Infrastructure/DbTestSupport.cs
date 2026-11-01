@@ -5,11 +5,18 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// <summary>Small raw-SQL helpers for arranging and checking test data. All values are bound parameters.</summary>
 public static class DbTestSupport
 {
-    public static async Task<Guid> InsertAgencyAsync(NpgsqlConnection owner, string name = "Test agency")
+    /// <summary>Inserts an organization. <paramref name="businessModel"/> is the stored name: company, agency or creator.</summary>
+    public static async Task<Guid> InsertAgencyAsync(
+        NpgsqlConnection owner, string name = "Test agency", string businessModel = "agency")
     {
-        await using var command = new NpgsqlCommand("INSERT INTO agencies (name) VALUES ($1) RETURNING id", owner)
+        await using var command = new NpgsqlCommand(
+            "INSERT INTO agencies (name, business_model) VALUES ($1, $2) RETURNING id", owner)
         {
-            Parameters = { new NpgsqlParameter<string> { TypedValue = name } }
+            Parameters =
+            {
+                new NpgsqlParameter<string> { TypedValue = name },
+                new NpgsqlParameter<string> { TypedValue = businessModel }
+            }
         };
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
@@ -28,11 +35,18 @@ public static class DbTestSupport
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
+    /// <summary>
+    /// Adds a member. Their business model is read from the organization, so a role the model does not
+    /// allow is refused by the database, exactly as it would be in production.
+    /// </summary>
     public static Task<int> InsertMemberAsync(
         NpgsqlConnection owner, Guid agencyId, Guid userId, string role, DateTimeOffset? lastActiveAt = null) =>
         ExecuteAsync(
             owner,
-            "INSERT INTO agency_members (agency_id, user_id, role, last_active_at) VALUES ($1, $2, $3, $4)",
+            """
+            INSERT INTO agency_members (agency_id, user_id, business_model, role, last_active_at)
+            SELECT a.id, $2, a.business_model, $3, $4 FROM agencies a WHERE a.id = $1
+            """,
             agencyId, userId, role, (lastActiveAt ?? DateTimeOffset.UtcNow).UtcDateTime);
 
     public static Task<int> InsertSiteAdminAsync(NpgsqlConnection owner, Guid userId) =>

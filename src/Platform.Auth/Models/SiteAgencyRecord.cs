@@ -1,10 +1,13 @@
+using Platform.Helpers.Constants;
+
 namespace Platform.Auth.Models;
 
-/// <summary>One row of site_admin_list_agencies(). <see cref="TotalCount"/> repeats on every row.</summary>
+/// <summary>One row of site_admin_list_agencies_v2(). <see cref="TotalCount"/> repeats on every row.</summary>
 public sealed class SiteAgencyRecord
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public BusinessModel BusinessModel { get; set; }
     public AgencyPlan Plan { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public long MemberCount { get; set; }

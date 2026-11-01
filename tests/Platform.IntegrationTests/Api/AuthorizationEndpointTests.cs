@@ -19,7 +19,7 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
 
     public async Task DisposeAsync() => await _host.DisposeAsync();
 
-    private string Token(AgencyRole role) => _host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), role);
+    private string Token(OrganizationRole role) => _host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), role);
 
     // --- Closed by default -------------------------------------------------------------------
 
@@ -48,7 +48,7 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     [Fact]
     public async Task ATokenSignedWithAnotherKey_IsAnsweredWith401()
     {
-        var forged = TestAccessTokens.Create(new string('z', 64), Guid.NewGuid(), Guid.NewGuid(), AgencyRole.Owner);
+        var forged = TestAccessTokens.Create(new string('z', 64), Guid.NewGuid(), Guid.NewGuid(), OrganizationRole.OrganizationAdmin);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await _host.GetAsync("/v1/workspaces", forged)).StatusCode);
     }
@@ -56,9 +56,10 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     // --- Roles -------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(AgencyRole.Manager)]
-    [InlineData(AgencyRole.Viewer)]
-    public async Task CreatingAWorkspace_IsForbidden_ForManagersAndViewers(AgencyRole role)
+    [InlineData(OrganizationRole.ClientManager)]
+    [InlineData(OrganizationRole.MarketingManager)]
+    [InlineData(OrganizationRole.ContentWriter)]
+    public async Task CreatingAWorkspace_IsForbidden_ForEveryRoleButTheOrganizationAdmin(OrganizationRole role)
     {
         var response = await _host.PostAsync("/v1/workspaces", new { name = "Client one" }, Token(role));
 
@@ -66,9 +67,8 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData(AgencyRole.Owner)]
-    [InlineData(AgencyRole.Admin)]
-    public async Task CreatingAWorkspace_PassesTheRolePolicy_ForOwnersAndAdmins(AgencyRole role)
+    [InlineData(OrganizationRole.OrganizationAdmin)]
+    public async Task CreatingAWorkspace_PassesTheRolePolicy_ForTheOrganizationAdmin(OrganizationRole role)
     {
         // An invalid body is answered 400 by the controller, which only runs once the policy has passed.
         var response = await _host.PostAsync("/v1/workspaces", new { name = "" }, Token(role));
@@ -90,11 +90,11 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData(AgencyRole.Owner, "/v1/site/me")]
-    [InlineData(AgencyRole.Admin, "/v1/site/overview")]
-    [InlineData(AgencyRole.Manager, "/v1/site/agencies")]
-    [InlineData(AgencyRole.Viewer, "/v1/site/overview")]
-    public async Task SiteEndpoints_AreForbidden_ForEveryAgencyRole_EvenTheOwner(AgencyRole role, string path)
+    [InlineData(OrganizationRole.OrganizationAdmin, "/v1/site/me")]
+    [InlineData(OrganizationRole.ClientManager, "/v1/site/overview")]
+    [InlineData(OrganizationRole.MarketingManager, "/v1/site/agencies")]
+    [InlineData(OrganizationRole.ContentWriter, "/v1/site/overview")]
+    public async Task SiteEndpoints_AreForbidden_ForEveryOrganizationRole_EvenTheOrganizationAdmin(OrganizationRole role, string path)
     {
         Assert.Equal(HttpStatusCode.Forbidden, (await _host.GetAsync(path, Token(role))).StatusCode);
     }
@@ -227,7 +227,7 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
         var errors = body.GetProperty("errors");
         Assert.True(errors.TryGetProperty("email", out _));
         Assert.True(errors.TryGetProperty("password", out _));
-        Assert.True(errors.TryGetProperty("agencyName", out _));
+        Assert.True(errors.TryGetProperty("organizationName", out _));
     }
 
     [Fact]

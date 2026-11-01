@@ -32,7 +32,7 @@ public sealed class NpgsqlConnectionFactoryTests(PostgresFixture postgres) : IAs
         var agency = Guid.NewGuid();
         var user = Guid.NewGuid();
         var tenant = new TenantContext();
-        tenant.Set(agency, user, "admin");
+        tenant.Set(agency, user, "organizationadmin");
         await using var dataSource = NpgsqlDataSource.Create(_db.AppConnectionString);
         var factory = new NpgsqlConnectionFactory(dataSource, tenant);
 

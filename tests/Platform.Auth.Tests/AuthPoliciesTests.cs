@@ -54,18 +54,18 @@ public sealed class AuthPoliciesTests
         (await _provider.GetRequiredService<IAuthorizationService>().AuthorizeAsync(user, null, policy)).Succeeded;
 
     [Theory]
-    [InlineData("owner", PolicyNames.CanRead, true)]
-    [InlineData("admin", PolicyNames.CanRead, true)]
-    [InlineData("manager", PolicyNames.CanRead, true)]
-    [InlineData("viewer", PolicyNames.CanRead, true)]
-    [InlineData("owner", PolicyNames.CanWrite, true)]
-    [InlineData("admin", PolicyNames.CanWrite, true)]
-    [InlineData("manager", PolicyNames.CanWrite, true)]
-    [InlineData("viewer", PolicyNames.CanWrite, false)]
-    [InlineData("owner", PolicyNames.CanManage, true)]
-    [InlineData("admin", PolicyNames.CanManage, true)]
-    [InlineData("manager", PolicyNames.CanManage, false)]
-    [InlineData("viewer", PolicyNames.CanManage, false)]
+    [InlineData("organizationadmin", PolicyNames.CanRead, true)]
+    [InlineData("clientmanager", PolicyNames.CanRead, true)]
+    [InlineData("marketingmanager", PolicyNames.CanRead, true)]
+    [InlineData("contentwriter", PolicyNames.CanRead, true)]
+    [InlineData("organizationadmin", PolicyNames.CanWrite, true)]
+    [InlineData("clientmanager", PolicyNames.CanWrite, false)]
+    [InlineData("marketingmanager", PolicyNames.CanWrite, true)]
+    [InlineData("contentwriter", PolicyNames.CanWrite, true)]
+    [InlineData("organizationadmin", PolicyNames.CanManage, true)]
+    [InlineData("clientmanager", PolicyNames.CanManage, false)]
+    [InlineData("marketingmanager", PolicyNames.CanManage, false)]
+    [InlineData("contentwriter", PolicyNames.CanManage, false)]
     public async Task EachRole_GetsExactlyItsPolicies(string role, string policy, bool expected)
     {
         Assert.Equal(expected, await AllowedAsync(SignedIn(role), policy));
@@ -90,12 +90,17 @@ public sealed class AuthPoliciesTests
     }
 
     [Theory]
-    [InlineData("Owner")]
-    [InlineData("OWNER")]
+    [InlineData("OrganizationAdmin")]
+    [InlineData("organizationAdmin")]
+    [InlineData("ORGANIZATIONADMIN")]
+    [InlineData("owner")]
+    [InlineData("admin")]
+    [InlineData("manager")]
+    [InlineData("viewer")]
     [InlineData("superuser")]
     [InlineData("0")]
     [InlineData("")]
-    public async Task AnUnknownOrMiscasedRole_GetsNoPolicy(string role)
+    public async Task AnUnknownMiscasedOrRetiredRole_GetsNoPolicy(string role)
     {
         Assert.False(await AllowedAsync(SignedIn(role), PolicyNames.CanRead));
         Assert.False(await AllowedAsync(SignedIn(role), PolicyNames.CanManage));
@@ -104,15 +109,15 @@ public sealed class AuthPoliciesTests
     [Theory]
     [InlineData(PolicyNames.CanRead)]
     [InlineData(PolicyNames.CanManage)]
-    public async Task ATokenWithoutAnAgency_GetsNoPolicy_EvenForAnOwner(string policy)
+    public async Task ATokenWithoutAnAgency_GetsNoPolicy_EvenForAnOrganizationAdmin(string policy)
     {
-        Assert.False(await AllowedAsync(SignedIn("owner", withAgency: false), policy));
+        Assert.False(await AllowedAsync(SignedIn("organizationadmin", withAgency: false), policy));
     }
 
     [Fact]
-    public async Task ATokenWithoutAUser_GetsNoPolicy_EvenForAnOwner()
+    public async Task ATokenWithoutAUser_GetsNoPolicy_EvenForAnOrganizationAdmin()
     {
-        Assert.False(await AllowedAsync(SignedIn("owner", withUser: false), PolicyNames.CanManage));
+        Assert.False(await AllowedAsync(SignedIn("organizationadmin", withUser: false), PolicyNames.CanManage));
     }
 
     [Fact]
@@ -122,9 +127,9 @@ public sealed class AuthPoliciesTests
         var authorization = _provider.GetRequiredService<IAuthorizationService>();
 
         Assert.NotNull(fallback);
-        Assert.True((await authorization.AuthorizeAsync(SignedIn("viewer"), null, fallback)).Succeeded);
+        Assert.True((await authorization.AuthorizeAsync(SignedIn("clientmanager"), null, fallback)).Succeeded);
         Assert.False((await authorization.AuthorizeAsync(Anonymous(), null, fallback)).Succeeded);
-        Assert.False((await authorization.AuthorizeAsync(SignedIn("viewer", withAgency: false), null, fallback)).Succeeded);
+        Assert.False((await authorization.AuthorizeAsync(SignedIn("clientmanager", withAgency: false), null, fallback)).Succeeded);
     }
 
     // --- Site admin --------------------------------------------------------------------------
@@ -155,11 +160,11 @@ public sealed class AuthPoliciesTests
     }
 
     [Theory]
-    [InlineData("owner")]
-    [InlineData("admin")]
-    [InlineData("manager")]
-    [InlineData("viewer")]
-    public async Task EveryAgencyRole_FailsTheSiteAdminPolicy_EvenWithAnAgency(string role)
+    [InlineData("organizationadmin")]
+    [InlineData("clientmanager")]
+    [InlineData("marketingmanager")]
+    [InlineData("contentwriter")]
+    public async Task EveryOrganizationRole_FailsTheSiteAdminPolicy_EvenWithAnAgency(string role)
     {
         Assert.False(await AllowedAsync(SignedIn(role), PolicyNames.SiteAdmin));
     }
@@ -195,7 +200,7 @@ public sealed class AuthPoliciesTests
         var defaultPolicy = await provider.GetDefaultPolicyAsync();
 
         Assert.False((await authorization.AuthorizeAsync(Anonymous(), null, defaultPolicy)).Succeeded);
-        Assert.False((await authorization.AuthorizeAsync(SignedIn("viewer", withAgency: false), null, defaultPolicy)).Succeeded);
-        Assert.True((await authorization.AuthorizeAsync(SignedIn("viewer"), null, defaultPolicy)).Succeeded);
+        Assert.False((await authorization.AuthorizeAsync(SignedIn("clientmanager", withAgency: false), null, defaultPolicy)).Succeeded);
+        Assert.True((await authorization.AuthorizeAsync(SignedIn("clientmanager"), null, defaultPolicy)).Succeeded);
     }
 }

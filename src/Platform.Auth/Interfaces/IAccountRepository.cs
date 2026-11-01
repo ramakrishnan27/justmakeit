@@ -13,7 +13,7 @@ public interface IAccountRepository
     Task<UserRecord?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Creates the user, agency, owner membership and first workspace in one transaction.
+    /// Creates the user, organization (agency row), founder membership and first workspace in one transaction.
     /// Returns false, and creates nothing, when the email is already registered.
     /// </summary>
     Task<bool> CreateAccountAsync(NewAccount account, CancellationToken cancellationToken);

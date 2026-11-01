@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { countLabel, formatDate, formatNumber, pageSummary, planLabel } from '../js/core/format.js';
+import { businessModelLabel, countLabel, formatDate, formatNumber, pageSummary, planLabel } from '../js/core/format.js';
 
 describe('formatNumber', () => {
   it('groups thousands', () => {
@@ -75,5 +75,28 @@ describe('countLabel', () => {
     assert.equal(countLabel(2, 'page'), '2 pages');
     assert.equal(countLabel(1500, 'page'), '1,500 pages');
     assert.equal(countLabel(2, 'agency', 'agencies'), '2 agencies');
+  });
+});
+
+describe('businessModelLabel', () => {
+  it('names the three business models', () => {
+    assert.equal(businessModelLabel('company'), 'Company');
+    assert.equal(businessModelLabel('agency'), 'Marketing agency');
+    assert.equal(businessModelLabel('creator'), 'Individual creator');
+  });
+
+  it('shows a model it does not know as given, capitalised', () => {
+    assert.equal(businessModelLabel('franchise'), 'Franchise');
+  });
+
+  it('does not read inherited object properties as models', () => {
+    assert.equal(businessModelLabel('constructor'), 'Constructor');
+    assert.equal(businessModelLabel('__proto__'), '__proto__');
+  });
+
+  it('shows a dash when there is no model', () => {
+    for (const value of [undefined, null, '', 3, {}]) {
+      assert.equal(businessModelLabel(value), '–', String(value));
+    }
   });
 });

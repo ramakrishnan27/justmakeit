@@ -6,50 +6,68 @@ namespace Platform.Auth.Tests;
 public sealed class RolePermissionsTests
 {
     [Theory]
-    [InlineData(AgencyRole.Owner, true)]
-    [InlineData(AgencyRole.Admin, true)]
-    [InlineData(AgencyRole.Manager, true)]
-    [InlineData(AgencyRole.Viewer, false)]
-    public void CanWrite_ExcludesOnlyViewers(AgencyRole role, bool expected) =>
+    [InlineData(OrganizationRole.OrganizationAdmin, true)]
+    [InlineData(OrganizationRole.ClientManager, false)]
+    [InlineData(OrganizationRole.MarketingManager, true)]
+    [InlineData(OrganizationRole.ContentWriter, true)]
+    public void CanWrite_ExcludesOnlyTheClientManager(OrganizationRole role, bool expected) =>
         Assert.Equal(expected, role.CanWrite());
 
     [Theory]
-    [InlineData(AgencyRole.Owner, true)]
-    [InlineData(AgencyRole.Admin, true)]
-    [InlineData(AgencyRole.Manager, false)]
-    [InlineData(AgencyRole.Viewer, false)]
-    public void CanManage_IsForOwnersAndAdminsOnly(AgencyRole role, bool expected) =>
+    [InlineData(OrganizationRole.OrganizationAdmin, true)]
+    [InlineData(OrganizationRole.ClientManager, false)]
+    [InlineData(OrganizationRole.MarketingManager, false)]
+    [InlineData(OrganizationRole.ContentWriter, false)]
+    public void CanManage_IsForOrganizationAdminsOnly(OrganizationRole role, bool expected) =>
         Assert.Equal(expected, role.CanManage());
 
     [Theory]
-    [InlineData(AgencyRole.Owner)]
-    [InlineData(AgencyRole.Admin)]
-    [InlineData(AgencyRole.Manager)]
-    [InlineData(AgencyRole.Viewer)]
-    public void CanRead_IsTrueForEveryRole(AgencyRole role) => Assert.True(role.CanRead());
+    [InlineData(OrganizationRole.OrganizationAdmin)]
+    [InlineData(OrganizationRole.ClientManager)]
+    [InlineData(OrganizationRole.MarketingManager)]
+    [InlineData(OrganizationRole.ContentWriter)]
+    public void CanRead_IsTrueForEveryRole(OrganizationRole role) => Assert.True(role.CanRead());
+
+    [Fact]
+    public void ThereAreExactlyFourRoles_SoAddingOneMeansDecidingWhatItMayDo()
+    {
+        // The theories above list every role. A fifth one must be added to them, to the policies and
+        // to the CHECK in 003_business_models.sql on purpose.
+        Assert.Equal(4, Enum.GetValues<OrganizationRole>().Length);
+    }
+
+    [Fact]
+    public void CanRead_IsFalseForAValueThatIsNotARole() => Assert.False(((OrganizationRole)99).CanRead());
 
     [Theory]
-    [InlineData("owner", AgencyRole.Owner)]
-    [InlineData("admin", AgencyRole.Admin)]
-    [InlineData("manager", AgencyRole.Manager)]
-    [InlineData("viewer", AgencyRole.Viewer)]
-    public void TryParse_ReadsTheStoredLowerCaseName(string value, AgencyRole expected)
+    [InlineData("organizationadmin", OrganizationRole.OrganizationAdmin)]
+    [InlineData("clientmanager", OrganizationRole.ClientManager)]
+    [InlineData("marketingmanager", OrganizationRole.MarketingManager)]
+    [InlineData("contentwriter", OrganizationRole.ContentWriter)]
+    public void TryParse_ReadsTheStoredLowerCaseName(string value, OrganizationRole expected)
     {
         Assert.True(RolePermissions.TryParse(value, out var role));
         Assert.Equal(expected, role);
     }
 
     [Theory]
-    [InlineData("Owner")]
-    [InlineData("ADMIN")]
+    [InlineData("OrganizationAdmin")]
+    [InlineData("organizationAdmin")]
+    [InlineData("ORGANIZATIONADMIN")]
     [InlineData("0")]
     [InlineData("1")]
-    [InlineData(" owner")]
-    [InlineData("owner ")]
+    [InlineData(" organizationadmin")]
+    [InlineData("organizationadmin ")]
+    [InlineData("organization admin")]
+    [InlineData("owner")]
+    [InlineData("admin")]
+    [InlineData("manager")]
+    [InlineData("viewer")]
+    [InlineData("siteadmin")]
     [InlineData("superuser")]
     [InlineData("")]
     [InlineData(null)]
-    public void TryParse_RejectsAnythingButTheExactName(string? value)
+    public void TryParse_RejectsAnythingButTheExactName_AndTheRolesThatNoLongerExist(string? value)
     {
         Assert.False(RolePermissions.TryParse(value, out _));
     }
@@ -57,8 +75,11 @@ public sealed class RolePermissionsTests
     [Fact]
     public void NamesWhere_ListsTheStoredNamesOfTheAllowedRoles()
     {
-        Assert.Equal(["owner", "admin"], RolePermissions.NamesWhere(RolePermissions.CanManage));
-        Assert.Equal(["owner", "admin", "manager"], RolePermissions.NamesWhere(RolePermissions.CanWrite));
-        Assert.Equal(["owner", "admin", "manager", "viewer"], RolePermissions.NamesWhere(RolePermissions.CanRead));
+        Assert.Equal(["organizationadmin"], RolePermissions.NamesWhere(RolePermissions.CanManage));
+        Assert.Equal(
+            ["organizationadmin", "marketingmanager", "contentwriter"], RolePermissions.NamesWhere(RolePermissions.CanWrite));
+        Assert.Equal(
+            ["organizationadmin", "clientmanager", "marketingmanager", "contentwriter"],
+            RolePermissions.NamesWhere(RolePermissions.CanRead));
     }
 }

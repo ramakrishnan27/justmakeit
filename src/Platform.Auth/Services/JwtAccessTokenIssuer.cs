@@ -18,7 +18,7 @@ public sealed class JwtAccessTokenIssuer(IOptions<JwtSettings> options, TimeProv
 {
     private readonly JsonWebTokenHandler _handler = new();
 
-    public AccessToken Issue(Guid userId, Guid agencyId, AgencyRole role) =>
+    public AccessToken Issue(Guid userId, Guid agencyId, OrganizationRole role) =>
         Sign(new Dictionary<string, object>
         {
             [ClaimNames.UserId] = userId.ToString(),

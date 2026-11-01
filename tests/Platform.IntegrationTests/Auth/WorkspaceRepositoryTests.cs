@@ -32,8 +32,8 @@ public sealed class WorkspaceRepositoryTests(PostgresFixture postgres) : IAsyncL
         _agencyB = await DbTestSupport.InsertAgencyAsync(owner, "Agency B");
         _userA = await DbTestSupport.InsertUserAsync(owner, "a@example.com");
         _userB = await DbTestSupport.InsertUserAsync(owner, "b@example.com");
-        await DbTestSupport.InsertMemberAsync(owner, _agencyA, _userA, "owner");
-        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userB, "owner");
+        await DbTestSupport.InsertMemberAsync(owner, _agencyA, _userA, "organizationadmin");
+        await DbTestSupport.InsertMemberAsync(owner, _agencyB, _userB, "organizationadmin");
     }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();

@@ -14,7 +14,7 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
         [.. list.EnumerateArray().Select(w => w.GetProperty("name").GetString()!)];
 
     /// <summary>A member with the given role in the session's agency, as a database row plus a token signed like the API's.</summary>
-    private async Task<string> MemberTokenAsync(Session ofAgency, AgencyRole role)
+    private async Task<string> MemberTokenAsync(Session ofAgency, OrganizationRole role)
     {
         await using var owner = await Host.Database.OpenOwnerAsync();
         var userId = await DbTestSupport.InsertUserAsync(owner, $"{role}-{Guid.NewGuid():N}@example.com");
@@ -25,11 +25,11 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
     // --- Listing -----------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(AgencyRole.Owner)]
-    [InlineData(AgencyRole.Admin)]
-    [InlineData(AgencyRole.Manager)]
-    [InlineData(AgencyRole.Viewer)]
-    public async Task EveryRole_CanListTheAgencysWorkspaces(AgencyRole role)
+    [InlineData(OrganizationRole.OrganizationAdmin)]
+    [InlineData(OrganizationRole.ClientManager)]
+    [InlineData(OrganizationRole.MarketingManager)]
+    [InlineData(OrganizationRole.ContentWriter)]
+    public async Task EveryRole_CanListTheOrganizationsWorkspaces(OrganizationRole role)
     {
         var owner = await Host.RegisterAsync();
         var token = await MemberTokenAsync(owner, role);
@@ -59,9 +59,8 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
     // --- Creating ----------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(AgencyRole.Owner)]
-    [InlineData(AgencyRole.Admin)]
-    public async Task OwnersAndAdmins_CanCreateAWorkspace(AgencyRole role)
+    [InlineData(OrganizationRole.OrganizationAdmin)]
+    public async Task OrganizationAdmins_CanCreateAWorkspace(OrganizationRole role)
     {
         var owner = await Host.RegisterAsync();
         var token = await MemberTokenAsync(owner, role);
@@ -76,9 +75,10 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
     }
 
     [Theory]
-    [InlineData(AgencyRole.Manager)]
-    [InlineData(AgencyRole.Viewer)]
-    public async Task ManagersAndViewers_CannotCreateAWorkspace(AgencyRole role)
+    [InlineData(OrganizationRole.ClientManager)]
+    [InlineData(OrganizationRole.MarketingManager)]
+    [InlineData(OrganizationRole.ContentWriter)]
+    public async Task EveryRoleButTheOrganizationAdmin_CannotCreateAWorkspace(OrganizationRole role)
     {
         var owner = await Host.RegisterAsync();
         var token = await MemberTokenAsync(owner, role);
@@ -88,6 +88,33 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
         AssertStatus(HttpStatusCode.Forbidden, response);
         Assert.Equal(1, await OwnerQueryAsync<long>(
             "SELECT count(*) FROM workspaces WHERE agency_id = @id", new { id = owner.AgencyId }));
+    }
+
+    [Theory]
+    [InlineData("company")]
+    [InlineData("agency")]
+    public async Task ACompanyOrAgencyFounder_CanAddMoreWorkspaces(string model)
+    {
+        var founder = await Host.RegisterAsync(businessModel: model);
+
+        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Second" }, founder.AccessToken));
+        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Third" }, founder.AccessToken));
+
+        Assert.Equal(3, await OwnerQueryAsync<long>("SELECT count(*) FROM workspaces WHERE agency_id = @id", new { id = founder.AgencyId }));
+    }
+
+    [Fact]
+    public async Task AnIndividualCreator_HasOneWorkspace_CanListIt_AndCannotAddAnother()
+    {
+        var creator = await Host.RegisterAsync(businessModel: "creator");
+
+        var list = await Host.GetAsync("/v1/workspaces", creator.AccessToken);
+        var add = await Host.PostAsync("/v1/workspaces", new { name = "Another" }, creator.AccessToken);
+
+        AssertStatus(HttpStatusCode.OK, list);
+        Assert.Equal(["Main workspace"], NamesIn(await ApiTestHost.ReadJsonAsync(list)));
+        AssertStatus(HttpStatusCode.Forbidden, add);
+        Assert.Equal(1, await OwnerQueryAsync<long>("SELECT count(*) FROM workspaces WHERE agency_id = @id", new { id = creator.AgencyId }));
     }
 
     [Fact]
@@ -155,7 +182,7 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
         await Host.PostAsync("/v1/workspaces", new { name = "First client" }, registered.AccessToken);
-        var second = await AddMembershipAsync(registered, "owner", "Second agency");
+        var second = await AddMembershipAsync(registered, "organizationadmin", "Second agency");
         await OwnerExecuteAsync("INSERT INTO workspaces (agency_id, name) VALUES (@id, 'Second client')", new { id = second });
 
         var inFirst = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/workspaces", registered.AccessToken));

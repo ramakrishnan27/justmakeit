@@ -1,5 +1,8 @@
+using Platform.Auth.Services;
+using Platform.Helpers.Constants;
 using Platform.Helpers.Utilities;
 using Platform.Helpers.Validation;
+using Platform.Infrastructure.Data;
 
 namespace Platform.Auth.DTOs;
 
@@ -60,6 +63,19 @@ internal static class FieldRules
         else if (value.Trim().Length > MaxNameLength)
         {
             errors.Add(field, $"{label} must be at most {MaxNameLength} characters.");
+        }
+    }
+
+    public static void RequiredBusinessModel(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Business model is required.");
+        }
+        else if (!BusinessModelRules.TryParse(value, out _))
+        {
+            var names = string.Join(", ", Enum.GetValues<BusinessModel>().Select(model => model.ToDb()));
+            errors.Add(field, $"Business model must be one of: {names}.");
         }
     }
 

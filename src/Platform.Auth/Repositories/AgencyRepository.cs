@@ -11,7 +11,7 @@ public sealed class AgencyRepository(IDbConnectionFactory connections) : IAgency
     {
         await using var connection = await connections.OpenAsync(agencyId, userId, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<AgencyRecord>(new CommandDefinition(
-            "SELECT id, name, plan FROM agencies WHERE id = @agencyId",
+            "SELECT id, name, business_model, plan FROM agencies WHERE id = @agencyId",
             new { agencyId },
             cancellationToken: cancellationToken));
     }

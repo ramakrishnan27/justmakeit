@@ -5,6 +5,7 @@ using Platform.Auth.Interfaces;
 using Platform.Auth.Models;
 using Platform.Auth.Services;
 using Platform.Auth.Tests.Support;
+using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Helpers.Tenancy;
 
@@ -13,6 +14,7 @@ namespace Platform.Auth.Tests;
 public sealed class WorkspaceServiceTests
 {
     private readonly IWorkspaceRepository _workspaces = Substitute.For<IWorkspaceRepository>();
+    private readonly IAgencyRepository _agencies = Substitute.For<IAgencyRepository>();
     private readonly TenantContext _tenant = new();
     private readonly FixedTimeProvider _time = FixedTimeProvider.Create();
     private readonly WorkspaceService _service;
@@ -22,15 +24,20 @@ public sealed class WorkspaceServiceTests
 
     public WorkspaceServiceTests()
     {
-        _service = new WorkspaceService(_workspaces, _tenant, _time, NullLogger<WorkspaceService>.Instance);
+        GivenBusinessModel(BusinessModel.Agency);
+        _service = new WorkspaceService(_workspaces, _agencies, _tenant, _time, NullLogger<WorkspaceService>.Instance);
     }
+
+    private void GivenBusinessModel(BusinessModel model) =>
+        _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>())
+            .Returns(new AgencyRecord { Id = _agencyId, Name = "Acme", BusinessModel = model, Plan = AgencyPlan.Trial });
 
     // --- List --------------------------------------------------------------------------------
 
     [Fact]
     public async Task List_AsksOnlyForTheAgencyInTheTenantContext()
     {
-        _tenant.Set(_agencyId, _userId, "viewer");
+        _tenant.Set(_agencyId, _userId, "clientmanager");
         _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
         [
             new WorkspaceRecord { Id = Guid.NewGuid(), AgencyId = _agencyId, Name = "One", CreatedAt = _time.Now },
@@ -54,11 +61,12 @@ public sealed class WorkspaceServiceTests
     // --- Create ------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData("owner")]
-    [InlineData("admin")]
-    public async Task Create_AsOwnerOrAdmin_StoresTheWorkspaceInTheCallersAgency(string role)
+    [InlineData(BusinessModel.Company)]
+    [InlineData(BusinessModel.Agency)]
+    public async Task Create_AsAnOrganizationAdmin_StoresTheWorkspaceInTheCallersOrganization(BusinessModel model)
     {
-        _tenant.Set(_agencyId, _userId, role);
+        GivenBusinessModel(model);
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
         WorkspaceRecord? stored = null;
         await _workspaces.InsertAsync(Arg.Do<WorkspaceRecord>(w => stored = w), _userId, Arg.Any<CancellationToken>());
 
@@ -73,14 +81,17 @@ public sealed class WorkspaceServiceTests
     }
 
     [Theory]
-    [InlineData("manager")]
-    [InlineData("viewer")]
-    [InlineData("Owner")]
+    [InlineData("marketingmanager")]
+    [InlineData("contentwriter")]
+    [InlineData("clientmanager")]
+    [InlineData("OrganizationAdmin")]
+    [InlineData("owner")]
+    [InlineData("admin")]
     [InlineData("0")]
     [InlineData("superuser")]
     [InlineData("")]
     [InlineData(null)]
-    public async Task Create_WithoutAnOwnerOrAdminRole_IsForbidden_AndStoresNothing(string? role)
+    public async Task Create_WithoutTheOrganizationAdminRole_IsForbidden_AndStoresNothing(string? role)
     {
         _tenant.Set(_agencyId, _userId, role);
 
@@ -91,13 +102,67 @@ public sealed class WorkspaceServiceTests
         await _workspaces.DidNotReceiveWithAnyArgs().InsertAsync(default!, default, default);
     }
 
+    [Fact]
+    public async Task Create_ForAnIndividualCreatorWhoHasTheirWorkspace_IsAConflict_AndStoresNothing()
+    {
+        // No role reaches this for a creator today (they are content writers); the model rule stands on its own.
+        GivenBusinessModel(BusinessModel.Creator);
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
+            [new WorkspaceRecord { Id = Guid.NewGuid(), AgencyId = _agencyId, Name = "Main workspace", CreatedAt = _time.Now }]);
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(
+            () => _service.CreateAsync(new CreateWorkspaceRequest("Second"), CancellationToken.None));
+
+        Assert.Equal("workspace_limit", exception.Code);
+        await _workspaces.DidNotReceiveWithAnyArgs().InsertAsync(default!, default, default);
+    }
+
+    [Fact]
+    public async Task Create_ForAnIndividualCreatorWithoutAWorkspaceYet_IsAllowed()
+    {
+        GivenBusinessModel(BusinessModel.Creator);
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns([]);
+
+        await _service.CreateAsync(new CreateWorkspaceRequest("Main workspace"), CancellationToken.None);
+
+        await _workspaces.Received(1).InsertAsync(Arg.Any<WorkspaceRecord>(), _userId, Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(BusinessModel.Company)]
+    [InlineData(BusinessModel.Agency)]
+    public async Task Create_ForACompanyOrAnAgency_DoesNotLookAtHowManyWorkspacesThereAre(BusinessModel model)
+    {
+        GivenBusinessModel(model);
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+
+        await _service.CreateAsync(new CreateWorkspaceRequest("Another client"), CancellationToken.None);
+
+        await _workspaces.DidNotReceiveWithAnyArgs().ListAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task Create_WhenTheOrganizationCannotBeSeen_IsUnauthorized_AndStoresNothing()
+    {
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns((AgencyRecord?)null);
+
+        var exception = await Assert.ThrowsAsync<UnauthorizedException>(
+            () => _service.CreateAsync(new CreateWorkspaceRequest("Client one"), CancellationToken.None));
+
+        Assert.Equal("membership_ended", exception.Code);
+        await _workspaces.DidNotReceiveWithAnyArgs().InsertAsync(default!, default, default);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
     public async Task Create_WithoutAName_IsABadRequest_AndStoresNothing(string? name)
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
 
         var exception = await Assert.ThrowsAsync<BadRequestException>(
             () => _service.CreateAsync(new CreateWorkspaceRequest(name), CancellationToken.None));
@@ -109,7 +174,7 @@ public sealed class WorkspaceServiceTests
     [Fact]
     public async Task Create_WithATooLongName_IsABadRequest()
     {
-        _tenant.Set(_agencyId, _userId, "owner");
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
 
         await Assert.ThrowsAsync<BadRequestException>(
             () => _service.CreateAsync(new CreateWorkspaceRequest(new string('n', 201)), CancellationToken.None));

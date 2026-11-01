@@ -72,7 +72,7 @@ public sealed class RefreshApiTests(PostgresFixture postgres) : AuthApiTestBase(
         var token = new JsonWebToken(body.GetProperty("accessToken").GetString()!);
         Assert.Equal(registered.UserId.ToString(), token.GetClaim("user_id").Value);
         Assert.Equal(registered.AgencyId.ToString(), token.GetClaim("agency_id").Value);
-        Assert.Equal("owner", token.GetClaim("role").Value);
+        Assert.Equal("organizationadmin", token.GetClaim("role").Value);
     }
 
     // --- Reuse detection ---------------------------------------------------------------------
@@ -97,7 +97,7 @@ public sealed class RefreshApiTests(PostgresFixture postgres) : AuthApiTestBase(
     public async Task Refresh_ReuseEndsOnlyThatUsersTokensForThatAgency()
     {
         var ana = await Host.RegisterAsync();
-        var anaOtherAgency = await AddMembershipAsync(ana, "viewer");
+        var anaOtherAgency = await AddMembershipAsync(ana, "clientmanager");
         var anaInOther = await Host.LoginAsync(ana.Email, agencyId: anaOtherAgency);
         var bob = await Host.RegisterAsync();
         await RefreshAsync(ana.RefreshToken);
@@ -164,12 +164,12 @@ public sealed class RefreshApiTests(PostgresFixture postgres) : AuthApiTestBase(
     public async Task Refresh_TakesTheRoleFromTheDatabase_SoADemotionAppliesAtOnce()
     {
         var registered = await Host.RegisterAsync();
-        await OwnerExecuteAsync("UPDATE agency_members SET role = 'viewer' WHERE user_id = @userId", new { userId = registered.UserId });
+        await OwnerExecuteAsync("UPDATE agency_members SET role = 'clientmanager' WHERE user_id = @userId", new { userId = registered.UserId });
 
         var body = await ApiTestHost.ReadJsonAsync(await RefreshAsync(registered.RefreshToken));
 
         var token = new JsonWebToken(body.GetProperty("accessToken").GetString()!);
-        Assert.Equal("viewer", token.GetClaim("role").Value);
+        Assert.Equal("clientmanager", token.GetClaim("role").Value);
         var create = await Host.PostAsync("/v1/workspaces", new { name = "Not allowed" }, body.GetProperty("accessToken").GetString());
         AssertStatus(HttpStatusCode.Forbidden, create);
     }

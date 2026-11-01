@@ -33,15 +33,15 @@ public sealed class MembershipRepositoryTests(PostgresFixture postgres) : IAsync
         await using var owner = await _db.OpenOwnerAsync();
         _agencyOne = await DbTestSupport.InsertAgencyAsync(owner, "Agency One");
         _agencyTwo = await DbTestSupport.InsertAgencyAsync(owner, "Agency Two");
-        _agencyThree = await DbTestSupport.InsertAgencyAsync(owner, "Agency Three");
+        _agencyThree = await DbTestSupport.InsertAgencyAsync(owner, "Agency Three", "company");
         _ana = await DbTestSupport.InsertUserAsync(owner, "ana@example.com");
         _bob = await DbTestSupport.InsertUserAsync(owner, "bob@example.com");
         _cleo = await DbTestSupport.InsertUserAsync(owner, "cleo@example.com");
 
-        await DbTestSupport.InsertMemberAsync(owner, _agencyOne, _ana, "owner", Noon.AddHours(-2));
-        await DbTestSupport.InsertMemberAsync(owner, _agencyTwo, _ana, "viewer", Noon.AddHours(-1));
-        await DbTestSupport.InsertMemberAsync(owner, _agencyTwo, _bob, "manager", Noon);
-        await DbTestSupport.InsertMemberAsync(owner, _agencyThree, _cleo, "admin", Noon);
+        await DbTestSupport.InsertMemberAsync(owner, _agencyOne, _ana, "organizationadmin", Noon.AddHours(-2));
+        await DbTestSupport.InsertMemberAsync(owner, _agencyTwo, _ana, "clientmanager", Noon.AddHours(-1));
+        await DbTestSupport.InsertMemberAsync(owner, _agencyTwo, _bob, "marketingmanager", Noon);
+        await DbTestSupport.InsertMemberAsync(owner, _agencyThree, _cleo, "organizationadmin", Noon);
     }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();
@@ -61,8 +61,24 @@ public sealed class MembershipRepositoryTests(PostgresFixture postgres) : IAsync
         var list = await _memberships.ListForUserAsync(_ana, CancellationToken.None);
 
         Assert.Equal(2, list.Count);
-        Assert.Contains(list, m => m.AgencyId == _agencyOne && m.AgencyName == "Agency One" && m.Role == AgencyRole.Owner);
-        Assert.Contains(list, m => m.AgencyId == _agencyTwo && m.AgencyName == "Agency Two" && m.Role == AgencyRole.Viewer);
+        Assert.Contains(list, m => m.AgencyId == _agencyOne && m.AgencyName == "Agency One" && m.Role == OrganizationRole.OrganizationAdmin);
+        Assert.Contains(list, m => m.AgencyId == _agencyTwo && m.AgencyName == "Agency Two" && m.Role == OrganizationRole.ClientManager);
+    }
+
+    [Fact]
+    public async Task ListForUser_ReturnsTheBusinessModelOfEachOrganization()
+    {
+        await using (var owner = await _db.OpenOwnerAsync())
+        {
+            var solo = await DbTestSupport.InsertAgencyAsync(owner, "Solo", "creator");
+            await DbTestSupport.InsertMemberAsync(owner, solo, _cleo, "contentwriter", Noon.AddHours(1));
+        }
+
+        var list = await _memberships.ListForUserAsync(_cleo, CancellationToken.None);
+
+        Assert.Equal(
+            [("Solo", BusinessModel.Creator, OrganizationRole.ContentWriter), ("Agency Three", BusinessModel.Company, OrganizationRole.OrganizationAdmin)],
+            list.Select(m => (m.AgencyName, m.BusinessModel, m.Role)));
     }
 
     [Fact]
@@ -103,7 +119,8 @@ public sealed class MembershipRepositoryTests(PostgresFixture postgres) : IAsync
         Assert.NotNull(found);
         Assert.Equal(_agencyTwo, found.AgencyId);
         Assert.Equal("Agency Two", found.AgencyName);
-        Assert.Equal(AgencyRole.Viewer, found.Role);
+        Assert.Equal(BusinessModel.Agency, found.BusinessModel);
+        Assert.Equal(OrganizationRole.ClientManager, found.Role);
     }
 
     [Fact]
@@ -160,6 +177,15 @@ public sealed class MembershipRepositoryTests(PostgresFixture postgres) : IAsync
         Assert.Equal(_agencyOne, agency.Id);
         Assert.Equal("Agency One", agency.Name);
         Assert.Equal(AgencyPlan.Trial, agency.Plan);
+        Assert.Equal(BusinessModel.Agency, agency.BusinessModel);
+    }
+
+    [Fact]
+    public async Task GetAgency_ReturnsTheBusinessModelItWasCreatedWith()
+    {
+        var company = await _agencies.GetAsync(_agencyThree, _cleo, CancellationToken.None);
+
+        Assert.Equal(BusinessModel.Company, company!.BusinessModel);
     }
 
     [Fact]

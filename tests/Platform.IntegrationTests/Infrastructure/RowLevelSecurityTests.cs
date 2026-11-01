@@ -27,11 +27,11 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
         _userB = await DbTestSupport.InsertUserAsync(owner, "b@example.com");
         _userBoth = await DbTestSupport.InsertUserAsync(owner, "both@example.com");
 
-        const string member = "INSERT INTO agency_members (agency_id, user_id, role) VALUES ($1, $2, $3)";
-        await DbTestSupport.ExecuteAsync(owner, member, _agencyA, _userA, "owner");
-        await DbTestSupport.ExecuteAsync(owner, member, _agencyB, _userB, "owner");
-        await DbTestSupport.ExecuteAsync(owner, member, _agencyA, _userBoth, "viewer");
-        await DbTestSupport.ExecuteAsync(owner, member, _agencyB, _userBoth, "viewer");
+        const string member = "INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES ($1, $2, 'agency', $3)";
+        await DbTestSupport.ExecuteAsync(owner, member, _agencyA, _userA, "organizationadmin");
+        await DbTestSupport.ExecuteAsync(owner, member, _agencyB, _userB, "organizationadmin");
+        await DbTestSupport.ExecuteAsync(owner, member, _agencyA, _userBoth, "clientmanager");
+        await DbTestSupport.ExecuteAsync(owner, member, _agencyB, _userBoth, "clientmanager");
 
         _workspaceA = await DbTestSupport.InsertWorkspaceAsync(owner, _agencyA, "Workspace A");
         _workspaceB = await DbTestSupport.InsertWorkspaceAsync(owner, _agencyB, "Workspace B");
@@ -179,8 +179,8 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
 
     [Theory]
     [InlineData("INSERT INTO workspaces (agency_id, name) VALUES ('{B}', 'intruder')")]
-    [InlineData("INSERT INTO agency_members (agency_id, user_id, role) VALUES ('{B}', '{A_USER}', 'owner')")]
-    [InlineData("INSERT INTO agencies (id, name) VALUES (gen_random_uuid(), 'intruder')")]
+    [InlineData("INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES ('{B}', '{A_USER}', 'agency', 'organizationadmin')")]
+    [InlineData("INSERT INTO agencies (id, name, business_model) VALUES (gen_random_uuid(), 'intruder', 'agency')")]
     [InlineData("INSERT INTO users (id, email, password_hash) VALUES (gen_random_uuid(), 'intruder@example.com', 'x')")]
     [InlineData("INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ('{B}', '{A_USER}', 'x', now() + interval '1 day')")]
     [InlineData("INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ('{A}', '{B_USER}', 'x', now() + interval '1 day')")]
@@ -199,7 +199,7 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     [Theory]
     [InlineData("UPDATE workspaces SET name = 'hacked' WHERE id = '{B_WS}'")]
     [InlineData("UPDATE agencies SET name = 'hacked' WHERE id = '{B}'")]
-    [InlineData("UPDATE agency_members SET role = 'owner' WHERE agency_id = '{B}'")]
+    [InlineData("UPDATE agency_members SET role = 'organizationadmin' WHERE agency_id = '{B}'")]
     [InlineData("UPDATE users SET full_name = 'hacked' WHERE id = '{B_USER}'")]
     [InlineData("UPDATE refresh_tokens SET revoked_at = now() WHERE id = '{B_TOKEN}'")]
     [InlineData("DELETE FROM workspaces WHERE id = '{B_WS}'")]
@@ -257,8 +257,8 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
         await using var transaction = await app.BeginTransactionAsync();
 
         await DbTestSupport.ExecuteAsync(app, "INSERT INTO users (id, email, password_hash, full_name) VALUES ($1, 'new@example.com', 'x', 'New')", user);
-        await DbTestSupport.ExecuteAsync(app, "INSERT INTO agencies (id, name, plan) VALUES ($1, 'New agency', 'trial')", agency);
-        await DbTestSupport.ExecuteAsync(app, "INSERT INTO agency_members (agency_id, user_id, role) VALUES ($1, $2, 'owner')", agency, user);
+        await DbTestSupport.ExecuteAsync(app, "INSERT INTO agencies (id, name, business_model, plan) VALUES ($1, 'New agency', 'agency', 'trial')", agency);
+        await DbTestSupport.ExecuteAsync(app, "INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES ($1, $2, 'agency', 'organizationadmin')", agency, user);
         await DbTestSupport.ExecuteAsync(app, "INSERT INTO workspaces (agency_id, name) VALUES ($1, 'First workspace')", agency);
         await DbTestSupport.ExecuteAsync(
             app,
