@@ -18,6 +18,8 @@ public sealed record Session(
 public sealed class ApiTestHost : IAsyncDisposable
 {
     public const string DefaultPassword = "a long enough password";
+    public const string AgencyCookieName = "refresh_token";
+    public const string SiteCookieName = "site_refresh_token";
 
     private readonly TestDatabase? _database;
     private int _counter;
@@ -36,14 +38,15 @@ public sealed class ApiTestHost : IAsyncDisposable
     public TestDatabase Database => _database ?? throw new InvalidOperationException("This host has no database.");
 
     /// <summary>A host over a fresh, migrated database. The API connects as app_user, as it does in production.</summary>
-    public static async Task<ApiTestHost> StartWithDatabaseAsync(PostgresFixture postgres, Action<Dictionary<string, string?>>? configure = null)
+    public static async Task<ApiTestHost> StartWithDatabaseAsync(
+        PostgresFixture postgres, Action<Dictionary<string, string?>, TestDatabase>? configure = null)
     {
         var database = await postgres.CreateDatabaseAsync();
         var settings = ApiHostFactory.ValidSettings();
         settings["ConnectionStrings:App"] = database.AppConnectionString;
         settings["RateLimiting:Auth:CredentialRequestsPerWindow"] = "100000";
         settings["RateLimiting:Auth:SessionRequestsPerWindow"] = "100000";
-        configure?.Invoke(settings);
+        configure?.Invoke(settings, database);
         return new ApiTestHost(new ApiHostFactory(settings), database);
     }
 
@@ -68,12 +71,24 @@ public sealed class ApiTestHost : IAsyncDisposable
     public Task<HttpResponseMessage> GetAsync(string path, string? accessToken = null, string? remoteIp = null) =>
         SendAsync(HttpMethod.Get, path, null, accessToken, null, remoteIp);
 
+    /// <param name="cookieName">The cookie to send <paramref name="refreshCookie"/> as: the agency one by default, or <see cref="SiteCookieName"/>.</param>
     public Task<HttpResponseMessage> PostAsync(
-        string path, object? body = null, string? accessToken = null, string? refreshCookie = null, string? remoteIp = null) =>
-        SendAsync(HttpMethod.Post, path, body, accessToken, refreshCookie, remoteIp);
+        string path,
+        object? body = null,
+        string? accessToken = null,
+        string? refreshCookie = null,
+        string? remoteIp = null,
+        string cookieName = AgencyCookieName) =>
+        SendAsync(HttpMethod.Post, path, body, accessToken, refreshCookie, remoteIp, cookieName);
 
     private async Task<HttpResponseMessage> SendAsync(
-        HttpMethod method, string path, object? body, string? accessToken, string? refreshCookie, string? remoteIp)
+        HttpMethod method,
+        string path,
+        object? body,
+        string? accessToken,
+        string? refreshCookie,
+        string? remoteIp,
+        string cookieName = AgencyCookieName)
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
@@ -88,7 +103,7 @@ public sealed class ApiTestHost : IAsyncDisposable
 
         if (refreshCookie is not null)
         {
-            request.Headers.Add("Cookie", $"refresh_token={refreshCookie}");
+            request.Headers.Add("Cookie", $"{cookieName}={refreshCookie}");
         }
 
         if (remoteIp is not null)
@@ -137,22 +152,32 @@ public sealed class ApiTestHost : IAsyncDisposable
         return document.RootElement.Clone();
     }
 
-    /// <summary>The raw Set-Cookie header for the refresh token, or null when the response sets none.</summary>
-    public static string? RefreshCookieHeader(HttpResponseMessage response) =>
+    /// <summary>The raw Set-Cookie header for the agency refresh token, or null when the response sets none.</summary>
+    public static string? RefreshCookieHeader(HttpResponseMessage response) => CookieHeader(response, AgencyCookieName);
+
+    /// <summary>The agency refresh token value the response put in its cookie, or null when there is none.</summary>
+    public static string? RefreshCookieValue(HttpResponseMessage response) => CookieValue(response, AgencyCookieName);
+
+    /// <summary>The raw Set-Cookie header for the site admin refresh token, or null when the response sets none.</summary>
+    public static string? SiteCookieHeader(HttpResponseMessage response) => CookieHeader(response, SiteCookieName);
+
+    /// <summary>The site admin refresh token value the response put in its cookie, or null when there is none.</summary>
+    public static string? SiteCookieValue(HttpResponseMessage response) => CookieValue(response, SiteCookieName);
+
+    private static string? CookieHeader(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues("Set-Cookie", out var values)
-            ? values.FirstOrDefault(value => value.StartsWith("refresh_token=", StringComparison.Ordinal))
+            ? values.FirstOrDefault(value => value.StartsWith(name + "=", StringComparison.Ordinal))
             : null;
 
-    /// <summary>The refresh token value the response put in its cookie, or null when there is none.</summary>
-    public static string? RefreshCookieValue(HttpResponseMessage response)
+    private static string? CookieValue(HttpResponseMessage response, string name)
     {
-        var header = RefreshCookieHeader(response);
+        var header = CookieHeader(response, name);
         if (header is null)
         {
             return null;
         }
 
-        var value = header["refresh_token=".Length..].Split(';')[0];
+        var value = header[(name.Length + 1)..].Split(';')[0];
         return value.Length == 0 ? null : value;
     }
 }

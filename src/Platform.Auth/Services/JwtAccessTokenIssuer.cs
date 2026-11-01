@@ -11,17 +11,35 @@ namespace Platform.Auth.Services;
 
 /// <summary>
 /// Issues the access token: HS256, signed with <c>Jwt:SigningKey</c>, valid for <c>Jwt:AccessTokenMinutes</c>,
-/// carrying only the user, agency and role. The validation side is <see cref="ConfigureJwtBearerOptions"/>.
+/// carrying only the user, the role and, for agency members, the agency. The validation side is
+/// <see cref="ConfigureJwtBearerOptions"/>.
 /// </summary>
 public sealed class JwtAccessTokenIssuer(IOptions<JwtSettings> options, TimeProvider time) : IAccessTokenIssuer
 {
     private readonly JsonWebTokenHandler _handler = new();
 
-    public AccessToken Issue(Guid userId, Guid agencyId, AgencyRole role)
+    public AccessToken Issue(Guid userId, Guid agencyId, AgencyRole role) =>
+        Sign(new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.AgencyId] = agencyId.ToString(),
+            [ClaimNames.Role] = role.ToDb()
+        });
+
+    public AccessToken IssueSiteAdmin(Guid userId) =>
+        Sign(new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.Role] = RoleNames.SiteAdmin
+        });
+
+    private AccessToken Sign(Dictionary<string, object> claims)
     {
         var jwt = options.Value;
         var now = time.GetUtcNow();
         var expires = now.AddMinutes(jwt.AccessTokenMinutes);
+
+        claims[JwtRegisteredClaimNames.Jti] = Guid.NewGuid().ToString("N");
 
         var token = _handler.CreateToken(new SecurityTokenDescriptor
         {
@@ -30,13 +48,7 @@ public sealed class JwtAccessTokenIssuer(IOptions<JwtSettings> options, TimeProv
             IssuedAt = now.UtcDateTime,
             NotBefore = now.UtcDateTime,
             Expires = expires.UtcDateTime,
-            Claims = new Dictionary<string, object>
-            {
-                [ClaimNames.UserId] = userId.ToString(),
-                [ClaimNames.AgencyId] = agencyId.ToString(),
-                [ClaimNames.Role] = role.ToDb(),
-                [JwtRegisteredClaimNames.Jti] = Guid.NewGuid().ToString("N")
-            },
+            Claims = claims,
             SigningCredentials = new SigningCredentials(
                 new SymmetricSecurityKey(jwt.GetSigningKeyBytes()), SecurityAlgorithms.HmacSha256)
         });

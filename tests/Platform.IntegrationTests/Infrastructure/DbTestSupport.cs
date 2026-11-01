@@ -35,6 +35,9 @@ public static class DbTestSupport
             "INSERT INTO agency_members (agency_id, user_id, role, last_active_at) VALUES ($1, $2, $3, $4)",
             agencyId, userId, role, (lastActiveAt ?? DateTimeOffset.UtcNow).UtcDateTime);
 
+    public static Task<int> InsertSiteAdminAsync(NpgsqlConnection owner, Guid userId) =>
+        ExecuteAsync(owner, "INSERT INTO site_admins (user_id) VALUES ($1)", userId);
+
     public static async Task<Guid> InsertWorkspaceAsync(NpgsqlConnection owner, Guid agencyId, string name = "Test workspace")
     {
         await using var command = new NpgsqlCommand("INSERT INTO workspaces (agency_id, name) VALUES ($1, $2) RETURNING id", owner)

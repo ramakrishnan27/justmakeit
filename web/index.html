@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Platform</title>
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>Site admin</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/main.js"></script>
 </head>
 <body>
-  <main>
-    <h1>Platform</h1>
-    <p>The web app arrives in Phase 6. This page only proves that the API serves the web folder.</p>
-  </main>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="app"><p class="boot">Loading…</p></div>
+  <noscript><p class="boot">This app needs JavaScript to run.</p></noscript>
 </body>
 </html>

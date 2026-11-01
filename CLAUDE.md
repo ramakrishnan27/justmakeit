@@ -27,7 +27,7 @@ JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.exa
 src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
         Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
-web/    vanilla JavaScript frontend (Phase 6+)
+web/    vanilla JavaScript frontend: site admin login and dashboard so far (see Decisions log); more in Phases 6-7
 ```
 
 Feature projects (Auth, Email, each channel) share one layout: `Controllers/ DTOs/ Models/ Interfaces/ Services/
@@ -52,8 +52,12 @@ PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pool
                                                          # Docker-tagged tests against a throwaway PostgreSQL instead of a container
 docker compose up -d                                     # local PostgreSQL 16 (copy .env.example to .env first)
 dotnet run --project src/Platform.Api                    # http://localhost:5080, Development, applies migrations; opens Swagger (/swagger)
-node --test web/tests                                    # frontend unit tests (from Phase 6)
+node --test "web/tests/**/*.test.js"                     # frontend unit tests (Node 22+ takes a glob, not a folder)
 ```
+
+Visual Studio keeps `src/Platform.Api/bin` locked while it debugs the API, so a terminal build of the same output fails.
+Build somewhere else with a custom configuration instead, for example `dotnet test tests/Platform.Auth.Tests -c Verify`,
+or `dotnet build src/Platform.Api -c Verify -o <folder>` to run a second copy on another port.
 
 ### Secrets (never committed)
 
@@ -64,6 +68,18 @@ dotnet user-secrets --project src/Platform.Api set "Jwt:SigningKey" "<random, 32
 dotnet user-secrets --project src/Platform.Api set "ConnectionStrings:Migrator" "Host=localhost;Port=5433;Database=platform;Username=platform_owner;Password=<POSTGRES_PASSWORD from .env>"
 dotnet user-secrets --project src/Platform.Api set "ConnectionStrings:App" "Host=localhost;Port=5433;Database=platform;Username=app_user;Password=<pick one>"
 ```
+
+To have a site admin (optional), name the account. If the email is not registered yet it is created from the password;
+if it is, it is promoted and its own password is kept. This runs when the API starts (so restart it after setting these),
+and only where migrations run (Development, or `Database:MigrateOnStartup`). Once the account exists the password can be
+removed.
+
+```
+dotnet user-secrets --project src/Platform.Api set "SiteAdmin:Email" "<you@example.com>"
+dotnet user-secrets --project src/Platform.Api set "SiteAdmin:Password" "<12 to 128 characters>"
+```
+
+Then sign in at `/admin` (http://localhost:5080/admin).
 
 `PLATFORM_TEST_POSTGRES` must name a server that holds no real data: the migration creates the cluster-wide role
 `app_user` and the tests create and drop databases. Without Docker, `initdb`/`pg_ctl` from any local PostgreSQL install can
@@ -77,7 +93,7 @@ migrator sets that role's password from this string, so it is configured in one 
 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
-  `001_init.sql` is released: do not change it. `002_email.sql` is written in Phase 2.
+  `001_init.sql` and `002_site_admin.sql` are released: do not change them. Phase 2 writes `003_email.sql`.
 - The API connects as `app_user` (not superuser, no BYPASSRLS, never to be given either). `NpgsqlConnectionFactory`
   sets `app.agency_id` and `app.user_id` on every connection it opens; `app_agency_id()` / `app_user_id()` read them and
   return NULL when unset or empty, so access fails closed.
@@ -119,11 +135,11 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `002_email.sql`, senders, contacts, lists, suppressions, CSV import |
+| 2 | `003_email.sql` (was 002; `002_site_admin.sql` took that number), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); the rest (workspace switcher, agency login and register, PWA) is still to do |
 | 7 | Frontend email screens |
 | 8 | CI, README, seed data, security review |
 
@@ -189,3 +205,43 @@ or was skipped, and any open question.
 - `refresh_tokens` rows are never deleted; expired and revoked ones need a cleanup job (open item for a later phase).
 - Tests: all 74 Phase 0 Docker-tagged tests and every Phase 1 one were run against a throwaway PostgreSQL 18.4 through
   `PLATFORM_TEST_POSTGRES`; CI will run them on PostgreSQL 16 through Testcontainers.
+
+**Site admin (an early slice of Phase 6, requested by the user: "site admin login and a dashboard after login")**
+- A **site admin** is a platform-wide super admin above all agencies, not an agency role. Chosen by the user over reusing
+  the agency owner/admin roles. Agency roles are unchanged.
+- Storage: `002_site_admin.sql` adds `site_admins` (user_id) and `site_admin_refresh_tokens`, both RLS enabled and forced.
+  `users` is not touched: the role is a separate table on purpose. `app_user` can only **SELECT** `site_admins`, and only
+  its own row, so no bug or injection in the API can promote anybody. Rows are written by the database owner: the startup
+  bootstrap (`SiteAdmin:Email` / `SiteAdmin:Password`, see Secrets) or SQL. The table is not a tenant table (no agency).
+- Cross-agency data comes only through `SECURITY DEFINER` functions (`site_admin_overview()`,
+  `site_admin_list_agencies(limit, offset)`, plus the `auth_find_site_refresh_token()` lookup). Each checks inside the
+  database that `app_user_id()` is in `site_admins` and otherwise raises 42501, which the API turns into 403 `not_site_admin`.
+  A site admin has no direct access to any other table: with no agency the policies show nothing.
+- `002_site_admin.sql` adds `owner_lookup` SELECT policies for the migrating role on `agencies`, `agency_members`,
+  `workspaces` and `site_admin_refresh_tokens` (existing tables, approved with the choice above). Without them a
+  non-superuser owner is blind under FORCE RLS and the functions would report zeros instead of failing. A test runs the
+  migrations as a non-superuser owner to prove this (`SiteAdminWithLimitedOwnerTests`).
+- Token: `POST /v1/site/login` issues `user_id` + `role: siteadmin` and **no `agency_id`**. So it passes no agency policy
+  and fails the fallback policy (403 on every agency endpoint and on unknown routes), and an agency token never passes the
+  new `SiteAdmin` policy (`PolicyNames.SiteAdmin`, `RoleNames.SiteAdmin`). A person who is both uses two separate sessions.
+  Login answers 401 `invalid_credentials` identically for an unknown email, a wrong password and a user who is not a site
+  admin, so the endpoint does not reveal who is one.
+- Sessions: own cookie `site_refresh_token` (HttpOnly, Secure, SameSite=Strict, **Path=/v1/site**), own table, same rotation
+  and reuse detection as the agency sessions. Refresh re-checks `site_admins`, so a demoted admin cannot refresh, and
+  their tokens are revoked. The token policy is per command: only INSERT requires being a site admin, so a demoted user can
+  still revoke what they hold (this was a real bug found by a test before release).
+- Endpoints: `POST /v1/site/login|refresh|logout`, `GET /v1/site/me|overview|agencies?page=&pageSize=` (page size 1 to 100,
+  default 20). They share the `/v1/auth/*` rate limit budgets (credentials for login, session for the rest).
+- `/v1/site/me` and the data endpoints re-check the database, so removing a site admin takes effect at once even though
+  their access token stays valid for up to 15 minutes.
+- Web client (vanilla JS, ES modules, Web Components, no build step): `web/index.html` shell, `js/core` (api client with
+  single-flight refresh, in-memory session, History API router with guard, formatters, messages), `js/pages`
+  (`admin-login`, `admin-dashboard`), `css/app.css`. Routes `/admin/login` and `/admin`; `MapPlatformWebFallback` makes
+  `/admin` and `/admin/*` answer with the shell so a reload works, and nothing else falls back (an API typo stays a real
+  error). `web/tests` is never served. The page has a strict CSP (no inline script or style) and no `innerHTML`; both
+  rules, and "tokens only in memory", are enforced by `web/tests/rules.test.js`. The access token lives only in the page;
+  a reload restores the session from the cookie.
+- Migration numbering: this took `002`, so Phase 2's email script is now `003_email.sql`.
+- Verified in a real browser (headless Edge over the DevTools protocol, throwaway profile): redirect to sign-in, wrong
+  password message, dashboard at 360 px and 1280 px, paging, reload restores the session, sign out, not-found page, nothing
+  in local/session storage, no horizontal scroll, no script errors (the only console entries are the expected 401s).

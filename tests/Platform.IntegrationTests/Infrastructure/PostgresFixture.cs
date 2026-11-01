@@ -51,6 +51,67 @@ public sealed class PostgresFixture : IAsyncLifetime
         return database;
     }
 
+    /// <summary>
+    /// Like <see cref="CreateDatabaseAsync"/>, but the migrations run as an ordinary role that owns the
+    /// database and is neither a superuser nor able to bypass row-level security. The other databases here
+    /// are owned by a superuser, who skips every policy; this is how production should be set up, and the
+    /// only way to prove that the SECURITY DEFINER functions still see the rows they report on.
+    /// </summary>
+    public async Task<TestDatabase> CreateDatabaseWithLimitedOwnerAsync()
+    {
+        const string role = "test_limited_owner";
+        var name = "test_" + Guid.NewGuid().ToString("N");
+        var password = TokenGenerator.Create();
+
+        await using (var admin = new NpgsqlConnection(AdminConnectionString))
+        {
+            await admin.OpenAsync();
+
+            // DDL cannot take bind parameters. Every name here is a constant or generated, never input.
+            await using (var createRole = new NpgsqlCommand(
+                           $"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN " +
+                           $"CREATE ROLE {role} LOGIN NOSUPERUSER NOBYPASSRLS CREATEROLE; END IF; END $$", admin))
+            {
+                await createRole.ExecuteNonQueryAsync();
+            }
+
+            await using (var setPassword = new NpgsqlCommand(
+                           "SELECT format('ALTER ROLE test_limited_owner WITH PASSWORD %L', $1)", admin)
+            {
+                Parameters = { new NpgsqlParameter<string> { TypedValue = password } }
+            })
+            {
+                var alter = (string)(await setPassword.ExecuteScalarAsync())!;
+                await using var run = new NpgsqlCommand(alter, admin);
+                await run.ExecuteNonQueryAsync();
+            }
+
+            // From PostgreSQL 16 a role with CREATEROLE may only change roles it administers. If app_user
+            // exists already (an earlier test class made it), hand the limited owner the right to set its password.
+            await using (var grantAdmin = new NpgsqlCommand(
+                           $"DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN " +
+                           $"GRANT app_user TO {role} WITH ADMIN OPTION; END IF; END $$", admin))
+            {
+                await grantAdmin.ExecuteNonQueryAsync();
+            }
+
+            await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" OWNER {role}", admin);
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var owner = new NpgsqlConnectionStringBuilder(AdminConnectionString)
+        {
+            Database = name,
+            Username = role,
+            Password = password
+        };
+        var app = new NpgsqlConnectionStringBuilder(owner.ConnectionString) { Username = "app_user", Password = _appPassword };
+
+        var database = new TestDatabase(name, AdminConnectionString, owner.ConnectionString, app.ConnectionString);
+        await database.MigrateAsync();
+        return database;
+    }
+
     /// <summary>Creates a database with nothing in it, for tests that exercise the migrator itself.</summary>
     public async Task<TestDatabase> CreateEmptyDatabaseAsync()
     {

@@ -33,6 +33,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHealthChecks("/health").AllowAnonymous();
+app.MapPlatformWebFallback();
 
 app.Run();
 

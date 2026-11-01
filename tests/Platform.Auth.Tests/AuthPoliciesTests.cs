@@ -36,6 +36,18 @@ public sealed class AuthPoliciesTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test", ClaimNames.UserId, ClaimNames.Role));
     }
 
+    private static ClaimsPrincipal SiteAdminToken(bool withUser = true, string role = "siteadmin")
+    {
+        // What the site admin login issues: the user and the role, and no agency.
+        var claims = new List<Claim> { new(ClaimNames.Role, role) };
+        if (withUser)
+        {
+            claims.Add(new Claim(ClaimNames.UserId, Guid.NewGuid().ToString()));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test", ClaimNames.UserId, ClaimNames.Role));
+    }
+
     private static ClaimsPrincipal Anonymous() => new(new ClaimsIdentity());
 
     private async Task<bool> AllowedAsync(ClaimsPrincipal user, string policy) =>
@@ -113,6 +125,66 @@ public sealed class AuthPoliciesTests
         Assert.True((await authorization.AuthorizeAsync(SignedIn("viewer"), null, fallback)).Succeeded);
         Assert.False((await authorization.AuthorizeAsync(Anonymous(), null, fallback)).Succeeded);
         Assert.False((await authorization.AuthorizeAsync(SignedIn("viewer", withAgency: false), null, fallback)).Succeeded);
+    }
+
+    // --- Site admin --------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ASiteAdminToken_PassesTheSiteAdminPolicy_WithoutAnAgency()
+    {
+        Assert.True(await AllowedAsync(SiteAdminToken(), PolicyNames.SiteAdmin));
+    }
+
+    [Theory]
+    [InlineData(PolicyNames.CanRead)]
+    [InlineData(PolicyNames.CanWrite)]
+    [InlineData(PolicyNames.CanManage)]
+    public async Task ASiteAdminToken_PassesNoAgencyPolicy(string policy)
+    {
+        Assert.False(await AllowedAsync(SiteAdminToken(), policy));
+    }
+
+    [Fact]
+    public async Task ASiteAdminToken_FailsTheFallbackAndDefaultPolicies_SoNoUnmarkedEndpointTakesIt()
+    {
+        var authorization = _provider.GetRequiredService<IAuthorizationService>();
+        var provider = _provider.GetRequiredService<IAuthorizationPolicyProvider>();
+
+        Assert.False((await authorization.AuthorizeAsync(SiteAdminToken(), null, (await provider.GetFallbackPolicyAsync())!)).Succeeded);
+        Assert.False((await authorization.AuthorizeAsync(SiteAdminToken(), null, await provider.GetDefaultPolicyAsync())).Succeeded);
+    }
+
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("admin")]
+    [InlineData("manager")]
+    [InlineData("viewer")]
+    public async Task EveryAgencyRole_FailsTheSiteAdminPolicy_EvenWithAnAgency(string role)
+    {
+        Assert.False(await AllowedAsync(SignedIn(role), PolicyNames.SiteAdmin));
+    }
+
+    [Fact]
+    public async Task AnAnonymousCaller_FailsTheSiteAdminPolicy()
+    {
+        Assert.False(await AllowedAsync(Anonymous(), PolicyNames.SiteAdmin));
+    }
+
+    [Fact]
+    public async Task ASiteAdminTokenWithoutAUser_FailsTheSiteAdminPolicy()
+    {
+        Assert.False(await AllowedAsync(SiteAdminToken(withUser: false), PolicyNames.SiteAdmin));
+    }
+
+    [Theory]
+    [InlineData("SiteAdmin")]
+    [InlineData("SITEADMIN")]
+    [InlineData("site_admin")]
+    [InlineData("admin")]
+    [InlineData("")]
+    public async Task AMiscasedOrInventedRole_FailsTheSiteAdminPolicy(string role)
+    {
+        Assert.False(await AllowedAsync(SiteAdminToken(role: role), PolicyNames.SiteAdmin));
     }
 
     [Fact]

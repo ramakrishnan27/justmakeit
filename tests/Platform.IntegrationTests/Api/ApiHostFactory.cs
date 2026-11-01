@@ -33,6 +33,10 @@ public sealed class ApiHostFactory(IReadOnlyDictionary<string, string?> settings
     public string CreateAccessToken(Guid userId, Guid agencyId, AgencyRole role) =>
         TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role);
 
+    /// <summary>A site admin token (user and role, no agency) signed with this host's key.</summary>
+    public string CreateSiteAdminAccessToken(Guid userId) =>
+        TestAccessTokens.CreateSiteAdmin(settings["Jwt:SigningKey"]!, userId);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);

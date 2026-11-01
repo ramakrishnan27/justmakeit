@@ -76,6 +76,143 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    // --- Site admin console: who may call what -----------------------------------------------
+
+    private string SiteAdminToken() => _host.Factory.CreateSiteAdminAccessToken(Guid.NewGuid());
+
+    [Theory]
+    [InlineData("/v1/site/me")]
+    [InlineData("/v1/site/overview")]
+    [InlineData("/v1/site/agencies")]
+    public async Task SiteEndpoints_AnswerAnAnonymousCaller_With401(string path)
+    {
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _host.GetAsync(path)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(AgencyRole.Owner, "/v1/site/me")]
+    [InlineData(AgencyRole.Admin, "/v1/site/overview")]
+    [InlineData(AgencyRole.Manager, "/v1/site/agencies")]
+    [InlineData(AgencyRole.Viewer, "/v1/site/overview")]
+    public async Task SiteEndpoints_AreForbidden_ForEveryAgencyRole_EvenTheOwner(AgencyRole role, string path)
+    {
+        Assert.Equal(HttpStatusCode.Forbidden, (await _host.GetAsync(path, Token(role))).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/v1/workspaces")]
+    [InlineData("POST", "/v1/workspaces")]
+    [InlineData("GET", "/v1/auth/me")]
+    [InlineData("POST", "/v1/auth/switch-agency")]
+    public async Task ASiteAdminToken_IsForbiddenOnEveryAgencyEndpoint(string method, string path)
+    {
+        var token = SiteAdminToken();
+
+        var response = method == "GET"
+            ? await _host.GetAsync(path, token)
+            : await _host.PostAsync(path, new { name = "x", agencyId = Guid.NewGuid() }, token);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASiteAdminToken_ReachesTheSiteEndpoints_WithoutAnAgency()
+    {
+        // An invalid page is answered 400 by the controller, which only runs once the policy has passed.
+        var response = await _host.GetAsync("/v1/site/agencies?page=0", SiteAdminToken());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True((await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors").TryGetProperty("page", out _));
+    }
+
+    [Theory]
+    [InlineData("page=0", "page")]
+    [InlineData("page=-2", "page")]
+    [InlineData("pageSize=0", "pageSize")]
+    [InlineData("pageSize=101", "pageSize")]
+    public async Task TheAgencyListRefusesBadPaging_BeforeAskingTheDatabase(string query, string field)
+    {
+        var response = await _host.GetAsync($"/v1/site/agencies?{query}", SiteAdminToken());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True((await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors").TryGetProperty(field, out _));
+    }
+
+    [Fact]
+    public async Task TheAgencyListRefusesAPageThatIsNotANumber()
+    {
+        var response = await _host.GetAsync("/v1/site/agencies?page=abc", SiteAdminToken());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASiteAdminTokenSignedWithAnotherKey_IsAnsweredWith401()
+    {
+        var forged = TestAccessTokens.CreateSiteAdmin(new string('z', 64), Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _host.GetAsync("/v1/site/overview", forged)).StatusCode);
+    }
+
+    [Fact]
+    public async Task SiteLogin_IsReachableWithoutAToken_AndReportsEveryBadField()
+    {
+        var response = await _host.PostAsync("/v1/site/login", new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await ApiTestHost.ReadJsonAsync(response);
+        Assert.Equal("validation_failed", body.GetProperty("code").GetString());
+        Assert.True(body.GetProperty("errors").TryGetProperty("email", out _));
+        Assert.True(body.GetProperty("errors").TryGetProperty("password", out _));
+        Assert.Null(ApiTestHost.SiteCookieHeader(response));
+    }
+
+    [Fact]
+    public async Task SiteRefresh_WithoutACookie_IsRejectedByTheServiceNotTheAuthMiddleware()
+    {
+        var response = await _host.PostAsync("/v1/site/refresh");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("invalid_refresh_token", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task SiteRefresh_ReadsOnlyItsOwnCookie_NotTheAgencyOne()
+    {
+        // An agency refresh cookie sent to the site endpoint is simply not the cookie it looks for.
+        var response = await _host.PostAsync("/v1/site/refresh", refreshCookie: "some-agency-token", cookieName: ApiTestHost.AgencyCookieName);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("invalid_refresh_token", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task SiteLogout_WithoutACookie_Succeeds_AndExpiresTheSiteCookieScopedToTheSitePath()
+    {
+        var response = await _host.PostAsync("/v1/site/logout");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var cookie = ApiTestHost.SiteCookieHeader(response);
+        Assert.NotNull(cookie);
+        Assert.Contains("path=/v1/site", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(ApiTestHost.RefreshCookieHeader(response)); // the agency cookie is never touched
+    }
+
+    [Theory]
+    [InlineData("/v1/site/login")]
+    [InlineData("/v1/site/refresh")]
+    [InlineData("/v1/site/logout")]
+    public async Task EverySiteAuthResponse_IsMarkedNoStore(string path)
+    {
+        var response = await _host.PostAsync(path, new { });
+
+        Assert.Contains("no-store", response.Headers.CacheControl?.ToString() ?? string.Empty);
+    }
+
     // --- Public endpoints --------------------------------------------------------------------
 
     [Fact]

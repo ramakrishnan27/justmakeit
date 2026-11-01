@@ -37,6 +37,14 @@ public static class AuthModule
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
 
+        services.AddOptions<SiteAdminSettings>().BindConfiguration(SiteAdminSettings.SectionName);
+        services.AddSingleton<IValidateOptions<SiteAdminSettings>, SiteAdminSettingsValidator>();
+        services.AddScoped<ISiteAdminRepository, SiteAdminRepository>();
+        services.AddScoped<ISiteAdminRefreshTokenRepository, SiteAdminRefreshTokenRepository>();
+        services.AddScoped<ISiteAdminAuthService, SiteAdminAuthService>();
+        services.AddScoped<ISiteAdminDashboardService, SiteAdminDashboardService>();
+        services.AddSingleton<ISiteAdminBootstrapper, SiteAdminBootstrapper>();
+
         // Makes this assembly's controllers part of the app without relying on assembly scanning.
         services.AddControllers().AddApplicationPart(typeof(AuthModule).Assembly);
 

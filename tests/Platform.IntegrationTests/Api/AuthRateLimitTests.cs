@@ -67,6 +67,32 @@ public sealed class AuthRateLimitTests
     }
 
     [Fact]
+    public async Task SiteLogin_SharesTheCredentialsBudget_WithAgencyLoginAndRegister()
+    {
+        await using var host = StartHost(credentials: 3);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await BadLogin(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await host.PostAsync("/v1/auth/register", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await host.PostAsync("/v1/site/login", new { })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.PostAsync("/v1/site/login", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await BadLogin(host)).StatusCode);
+    }
+
+    [Fact]
+    public async Task SiteSessionEndpoints_ShareTheSessionBudget_WithTheAgencyOnes()
+    {
+        await using var host = StartHost(session: 3);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await RefreshWithoutCookie(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await host.PostAsync("/v1/site/refresh")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await host.GetAsync("/v1/site/me")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.PostAsync("/v1/site/refresh")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.GetAsync("/v1/site/overview", host.Factory.CreateSiteAdminAccessToken(Guid.NewGuid()))).StatusCode);
+    }
+
+    [Fact]
     public async Task EachClientAddress_HasItsOwnBudget()
     {
         await using var host = StartHost(credentials: 2);

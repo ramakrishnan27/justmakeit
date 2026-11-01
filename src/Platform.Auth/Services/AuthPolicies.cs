@@ -33,5 +33,12 @@ public static class AuthPolicies
         options.AddPolicy(PolicyNames.CanManage, policy => policy
             .Combine(signedIn)
             .RequireRole(RolePermissions.NamesWhere(RolePermissions.CanManage)));
+
+        // A site admin token has no agency, so it is built apart from signedIn on purpose. Naming this
+        // policy on an endpoint replaces the fallback, which is how those endpoints take such a token.
+        options.AddPolicy(PolicyNames.SiteAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireClaim(ClaimNames.UserId)
+            .RequireRole(RoleNames.SiteAdmin));
     }
 }

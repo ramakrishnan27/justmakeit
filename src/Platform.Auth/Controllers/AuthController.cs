@@ -47,7 +47,7 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     [AllowAnonymous]
     [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Refresh(CancellationToken cancellationToken) =>
-        Issue(await auth.RefreshAsync(RefreshTokenCookie.Read(Request), cancellationToken), StatusCodes.Status200OK);
+        Issue(await auth.RefreshAsync(RefreshTokenCookie.Agency.Read(Request), cancellationToken), StatusCodes.Status200OK);
 
     /// <summary>Revokes the refresh token and removes the cookie. Safe to call without a session.</summary>
     [HttpPost("logout")]
@@ -55,8 +55,8 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(CancellationToken cancellationToken)
     {
-        await auth.LogoutAsync(RefreshTokenCookie.Read(Request), cancellationToken);
-        RefreshTokenCookie.Clear(Response);
+        await auth.LogoutAsync(RefreshTokenCookie.Agency.Read(Request), cancellationToken);
+        RefreshTokenCookie.Agency.Clear(Response);
         return NoContent();
     }
 
@@ -67,7 +67,7 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     public async Task<IActionResult> SwitchAgency(SwitchAgencyRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
-        var result = await auth.SwitchAgencyAsync(request, RefreshTokenCookie.Read(Request), cancellationToken);
+        var result = await auth.SwitchAgencyAsync(request, RefreshTokenCookie.Agency.Read(Request), cancellationToken);
         return Issue(result, StatusCodes.Status200OK);
     }
 
@@ -81,7 +81,7 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     // The refresh token leaves only through the cookie; the body carries the access token alone.
     private ObjectResult Issue(AuthResult result, int statusCode)
     {
-        RefreshTokenCookie.Write(Response, result.RefreshToken, result.RefreshTokenExpiresAt);
+        RefreshTokenCookie.Agency.Write(Response, result.RefreshToken, result.RefreshTokenExpiresAt);
         return StatusCode(statusCode, result.Tokens);
     }
 }

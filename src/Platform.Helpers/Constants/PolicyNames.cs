@@ -14,4 +14,7 @@ public static class PolicyNames
 
     /// <summary>Members who manage the agency itself (members, workspaces): owner or admin.</summary>
     public const string CanManage = "CanManage";
+
+    /// <summary>A platform-wide site admin. Their token has no agency, so it passes no agency policy.</summary>
+    public const string SiteAdmin = "SiteAdmin";
 }

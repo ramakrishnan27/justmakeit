@@ -168,7 +168,7 @@ public sealed class HealthAndHostingTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
-        Assert.Contains("<h1>Platform</h1>", await response.Content.ReadAsStringAsync());
+        Assert.Contains("<div id=\"app\">", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

@@ -146,6 +146,56 @@ public sealed class RequestValidationTests
         Assert.Equal(["agencyId"], Fields(new SwitchAgencyRequest(Guid.Empty).Validate()));
     }
 
+    // --- Site admin --------------------------------------------------------------------------
+
+    [Fact]
+    public void SiteLogin_WithEmailAndPassword_IsValid()
+    {
+        Assert.False(new SiteLoginRequest("boss@example.com", "x").Validate().Any);
+    }
+
+    [Fact]
+    public void SiteLogin_ReportsEveryBadField()
+    {
+        Assert.Equal(["email", "password"], Fields(new SiteLoginRequest("nope", "").Validate()));
+        Assert.Equal(["email", "password"], Fields(new SiteLoginRequest(null, null).Validate()));
+    }
+
+    [Fact]
+    public void SiteLogin_WithAPasswordOver128Characters_IsRejected()
+    {
+        Assert.Equal(["password"], Fields(new SiteLoginRequest("boss@example.com", new string('p', 129)).Validate()));
+    }
+
+    [Fact]
+    public void SiteAgenciesQuery_DefaultsToTheFirstPageOfTwenty_AndIsValid()
+    {
+        var query = new SiteAgenciesQuery();
+
+        Assert.Equal(1, query.Page);
+        Assert.Equal(20, query.PageSize);
+        Assert.False(query.Validate().Any);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(1, 100)]
+    [InlineData(500, 50)]
+    public void SiteAgenciesQuery_WithinTheLimits_IsValid(int page, int pageSize)
+    {
+        Assert.False(new SiteAgenciesQuery(page, pageSize).Validate().Any);
+    }
+
+    [Theory]
+    [InlineData(0, 20, "page")]
+    [InlineData(-3, 20, "page")]
+    [InlineData(1, 0, "pageSize")]
+    [InlineData(1, 101, "pageSize")]
+    public void SiteAgenciesQuery_OutsideTheLimits_ReportsTheBadField(int page, int pageSize, string field)
+    {
+        Assert.Equal([field], Fields(new SiteAgenciesQuery(page, pageSize).Validate()));
+    }
+
     [Theory]
     [InlineData("Client one", false)]
     [InlineData("x", false)]

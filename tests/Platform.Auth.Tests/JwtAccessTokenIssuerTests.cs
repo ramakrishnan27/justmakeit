@@ -106,6 +106,51 @@ public sealed class JwtAccessTokenIssuerTests
         Assert.NotEqual(first.Id, second.Id);
     }
 
+    // --- Site admin tokens -------------------------------------------------------------------
+
+    [Fact]
+    public void IssueSiteAdmin_CarriesTheUserAndTheSiteAdminRole_ButNoAgency()
+    {
+        var token = new JsonWebToken(CreateIssuer().IssueSiteAdmin(_userId).Value);
+
+        Assert.Equal(_userId.ToString(), token.GetClaim(ClaimNames.UserId).Value);
+        Assert.Equal("siteadmin", token.GetClaim(ClaimNames.Role).Value);
+        Assert.False(token.TryGetClaim(ClaimNames.AgencyId, out _));
+    }
+
+    [Fact]
+    public async Task IssueSiteAdmin_ProducesATokenTheApiAccepts_SignedWithHs256_ForFifteenMinutes()
+    {
+        var issued = CreateIssuer().IssueSiteAdmin(_userId);
+
+        var result = await ValidateAsync(issued.Value);
+
+        Assert.True(result.IsValid, result.Exception?.Message);
+        Assert.Equal("HS256", new JsonWebToken(issued.Value).Alg);
+        Assert.Equal(_time.Now.AddMinutes(15), issued.ExpiresAt);
+    }
+
+    [Fact]
+    public void IssueSiteAdmin_GivesEveryTokenItsOwnId()
+    {
+        var issuer = CreateIssuer();
+
+        Assert.NotEqual(
+            new JsonWebToken(issuer.IssueSiteAdmin(_userId).Value).Id,
+            new JsonWebToken(issuer.IssueSiteAdmin(_userId).Value).Id);
+    }
+
+    [Fact]
+    public void AnAgencyToken_NeverCarriesTheSiteAdminRole()
+    {
+        foreach (var role in Enum.GetValues<AgencyRole>())
+        {
+            var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, role).Value);
+
+            Assert.NotEqual("siteadmin", token.GetClaim(ClaimNames.Role).Value);
+        }
+    }
+
     [Fact]
     public async Task Issue_ATokenSignedByAnotherKey_IsNotValid()
     {

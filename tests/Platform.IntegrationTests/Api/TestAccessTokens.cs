@@ -12,7 +12,23 @@ namespace Platform.IntegrationTests.Api;
 /// </summary>
 public static class TestAccessTokens
 {
-    public static string Create(string signingKey, Guid userId, Guid agencyId, AgencyRole role)
+    public static string Create(string signingKey, Guid userId, Guid agencyId, AgencyRole role) =>
+        Sign(signingKey, new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.AgencyId] = agencyId.ToString(),
+            [ClaimNames.Role] = role.ToDb()
+        });
+
+    /// <summary>A site admin token: the user and the siteadmin role, and no agency, like the real login issues.</summary>
+    public static string CreateSiteAdmin(string signingKey, Guid userId) =>
+        Sign(signingKey, new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.Role] = RoleNames.SiteAdmin
+        });
+
+    private static string Sign(string signingKey, Dictionary<string, object> claims)
     {
         var now = DateTime.UtcNow;
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
@@ -22,12 +38,7 @@ public static class TestAccessTokens
             IssuedAt = now,
             NotBefore = now,
             Expires = now.AddMinutes(15),
-            Claims = new Dictionary<string, object>
-            {
-                [ClaimNames.UserId] = userId.ToString(),
-                [ClaimNames.AgencyId] = agencyId.ToString(),
-                [ClaimNames.Role] = role.ToDb()
-            },
+            Claims = claims,
             SigningCredentials = new SigningCredentials(
                 new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)), SecurityAlgorithms.HmacSha256)
         });

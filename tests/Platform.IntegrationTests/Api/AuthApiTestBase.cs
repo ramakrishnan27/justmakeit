@@ -11,12 +11,14 @@ namespace Platform.IntegrationTests.Api;
 /// </summary>
 public abstract class AuthApiTestBase(PostgresFixture postgres) : IAsyncLifetime
 {
+    protected PostgresFixture Postgres { get; } = postgres;
+
     protected ApiTestHost Host { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
         DapperConfiguration.Configure();
-        Host = await ApiTestHost.StartWithDatabaseAsync(postgres);
+        Host = await ApiTestHost.StartWithDatabaseAsync(Postgres);
     }
 
     public async Task DisposeAsync() => await Host.DisposeAsync();
