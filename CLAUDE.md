@@ -23,7 +23,7 @@ needs to run). **Ask before adding any other.**
 ## Layout and the dependency rule
 
 ```
-Platform.sln  Directory.Build.props  global.json  docker-compose.yml  .env.example
+JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.example
 src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
         Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
@@ -45,14 +45,14 @@ services inside Platform.Api. Adding a channel = fill in its project + one `buil
 ## Commands
 
 ```
-dotnet build Platform.sln
-dotnet test  Platform.sln                              # needs Docker (Testcontainers starts postgres:16-alpine)
-dotnet test  Platform.sln --filter "Category!=Docker"  # everything that does not need Docker
-PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pooling=false"  dotnet test Platform.sln
-                                                       # Docker-tagged tests against a throwaway PostgreSQL instead of a container
-docker compose up -d                                   # local PostgreSQL 16 (copy .env.example to .env first)
-dotnet run --project src/Platform.Api                  # http://localhost:5080, Development, applies migrations
-node --test web/tests                                  # frontend unit tests (from Phase 6)
+dotnet build JustMakeIt.sln
+dotnet test  JustMakeIt.sln                              # needs Docker (Testcontainers starts postgres:16-alpine)
+dotnet test  JustMakeIt.sln --filter "Category!=Docker"  # everything that does not need Docker
+PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pooling=false"  dotnet test JustMakeIt.sln
+                                                         # Docker-tagged tests against a throwaway PostgreSQL instead of a container
+docker compose up -d                                     # local PostgreSQL 16 (copy .env.example to .env first)
+dotnet run --project src/Platform.Api                    # http://localhost:5080, Development, applies migrations
+node --test web/tests                                    # frontend unit tests (from Phase 6)
 ```
 
 ### Secrets (never committed)
