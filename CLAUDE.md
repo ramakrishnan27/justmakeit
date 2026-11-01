@@ -51,7 +51,7 @@ dotnet test  JustMakeIt.sln --filter "Category!=Docker"  # everything that does 
 PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pooling=false"  dotnet test JustMakeIt.sln
                                                          # Docker-tagged tests against a throwaway PostgreSQL instead of a container
 docker compose up -d                                     # local PostgreSQL 16 (copy .env.example to .env first)
-dotnet run --project src/Platform.Api                    # http://localhost:5080, Development, applies migrations
+dotnet run --project src/Platform.Api                    # http://localhost:5080, Development, applies migrations; opens Swagger (/swagger)
 node --test web/tests                                    # frontend unit tests (from Phase 6)
 ```
 
