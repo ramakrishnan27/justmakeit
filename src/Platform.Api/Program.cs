@@ -29,6 +29,7 @@ app.UsePlatformCors();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<TenantContextMiddleware>();
+app.UseMiddleware<PermissionVersionMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

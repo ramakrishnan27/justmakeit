@@ -55,6 +55,13 @@ describe('frontend rules', () => {
     }
   });
 
+  it('never sets an inline style, which the content security policy would block: styling lives in the stylesheet', () => {
+    const banned = /\.style\b|['"]style['"]|\bstyle\s*:/;
+    for (const script of scripts) {
+      assert.doesNotMatch(code(script), banned, relative(webRoot, script));
+    }
+  });
+
   it('starts the router only after the session has settled, so a page renders once and reads one-time values once', () => {
     const main = code(join(webRoot, 'js', 'main.js'));
     const restored = main.indexOf('await session.restore()');

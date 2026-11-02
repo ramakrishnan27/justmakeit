@@ -10,6 +10,15 @@ public interface ITenantContext
     Guid? UserId { get; }
     string? Role { get; }
 
+    /// <summary>
+    /// The permission keys the access token carried (see <c>PermissionKeys</c>). Empty when there is no
+    /// token, for a site admin, and for background work, so a missing permission is always a denial.
+    /// </summary>
+    IReadOnlySet<string> Permissions { get; }
+
+    /// <summary>Whether the caller's token carried <paramref name="permission"/>. Services use it to re-check what the policy already checked.</summary>
+    bool HasPermission(string permission);
+
     /// <summary>Returns the agency id, or throws <see cref="Exceptions.UnauthorizedException"/> when none is set.</summary>
     Guid RequireAgencyId();
 

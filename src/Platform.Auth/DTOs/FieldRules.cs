@@ -86,4 +86,61 @@ internal static class FieldRules
             errors.Add(field, $"{label} must be at most {MaxNameLength} characters.");
         }
     }
+
+    public static void RequiredRole(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Role is required.");
+        }
+        else if (!RolePermissions.TryParse(value, out _))
+        {
+            var names = string.Join(", ", Enum.GetValues<OrganizationRole>().Select(role => role.ToDb()));
+            errors.Add(field, $"Role must be one of: {names}.");
+        }
+    }
+
+    /// <summary>The words on a menu item. Trimmed before it is stored; no line breaks or other control characters.</summary>
+    public static void MenuLabel(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Label is required.");
+        }
+        else if (value.Trim().Length > MaxMenuLabelLength)
+        {
+            errors.Add(field, $"Label must be at most {MaxMenuLabelLength} characters.");
+        }
+        else if (value.Any(char.IsControl))
+        {
+            errors.Add(field, "Label cannot contain line breaks or other control characters.");
+        }
+    }
+
+    public static void MenuIcon(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Icon is required.");
+        }
+        else if (!MenuIcons.IsKnown(value))
+        {
+            errors.Add(field, $"Icon must be one of: {string.Join(", ", MenuIcons.All)}.");
+        }
+    }
+
+    /// <summary>The key of a built-in page: lower-case words with hyphens, at most 40 characters. Whether the page exists is the database's answer.</summary>
+    public static void PageKey(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Page is required.");
+        }
+        else if (value.Length > 40 || !char.IsAsciiLetterLower(value[0]) || !value.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-'))
+        {
+            errors.Add(field, "Page is not a valid page key.");
+        }
+    }
+
+    public const int MaxMenuLabelLength = 60;
 }

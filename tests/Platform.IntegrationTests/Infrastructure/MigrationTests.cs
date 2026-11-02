@@ -22,6 +22,11 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
     [InlineData("site_admins")]
     [InlineData("site_admin_refresh_tokens")]
     [InlineData("user_identities")]
+    [InlineData("permissions")]
+    [InlineData("role_permissions")]
+    [InlineData("permission_state")]
+    [InlineData("menu_pages")]
+    [InlineData("menu_items")]
     public async Task CoreTable_ExistsWithRowLevelSecurityEnabledAndForced(string table)
     {
         await using var owner = await _db.OpenOwnerAsync();
@@ -70,8 +75,9 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
         await TestDatabase.MigrateAsync(_db.OwnerConnectionString, _db.AppConnectionString);
 
         await using var owner = await _db.OpenOwnerAsync();
-        // 001_init.sql has five tables, 002_site_admin.sql two more and 004_external_identities.sql one; a second run adds none.
-        Assert.Equal(8, await DbTestSupport.ScalarAsync<long>(
+        // 001_init.sql has five tables, 002_site_admin.sql two more, 004_external_identities.sql one and
+        // 005_menus_permissions.sql five; a second run adds none.
+        Assert.Equal(13, await DbTestSupport.ScalarAsync<long>(
             owner,
             "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
             "WHERE n.nspname = 'public' AND c.relkind = 'r'"));

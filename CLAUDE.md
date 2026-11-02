@@ -111,7 +111,8 @@ migrator sets that role's password from this string, so it is configured in one 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
   `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql` and `004_external_identities.sql` are released: do not
-  change them. Phase 2 writes `005_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
+  change them. `005_menus_permissions.sql` is the menus and permissions slice (released once committed). Phase 2 writes
+  `006_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
   example the return type of a function that `CREATE OR REPLACE` makes again): add a new function instead.
 - The API connects as `app_user` (not superuser, no BYPASSRLS, never to be given either). `NpgsqlConnectionFactory`
   sets `app.agency_id` and `app.user_id` on every connection it opens; `app_agency_id()` / `app_user_id()` read them and
@@ -122,6 +123,12 @@ migrator sets that role's password from this string, so it is configured in one 
   indexed. snake_case names. `agencies` and `agency_members` also carry `business_model` (see Business models and roles).
 - Work that must span agencies (workers, login, refresh) uses narrow `SECURITY DEFINER` functions that return only ids
   or the one row asked for. Never grant BYPASSRLS.
+- **Global configuration tables** (`permissions`, `role_permissions`, `permission_state`, `menu_pages`, `menu_items`) are not
+  tenant tables: no `agency_id`, RLS still enabled and forced, `app_user` has `SELECT` only (none at all on
+  `permission_state`) and only when a user is set, and every change goes through a `site_admin_*` `SECURITY DEFINER`
+  function that checks `site_admins` inside the database. Their seeds are `INSERT ... ON CONFLICT DO NOTHING` and never
+  `UPDATE` a grant or an item, because the script runs on every start and must not undo what the Site admin set. A page or
+  permission added later is inserted the same way and followed by `SELECT menu_apply_default_items();`.
 - Dapper rules: row models are **classes with settable properties** (underscore matching does not apply to constructor
   parameters, so no positional records). Write enums with `.ToDb()` (Dapper ignores enum type handlers). Write jsonb with
   `JsonbParameter`. `DateTimeOffset` is handled by `DateTimeOffsetTypeHandler`. Explicit column lists, parameterised SQL only.
@@ -133,6 +140,12 @@ migrator sets that role's password from this string, so it is configured in one 
 - Controllers are thin: validate, call one service method, return. Business rules live in services, SQL in repositories.
   Services throw `AppException` subclasses (400/401/403/404/409); middleware turns them into problem responses and never
   returns stack traces. Validate DTOs at the controller and re-check rules in the service.
+- **Authorization is by permission, and the permissions are in the access token.** An endpoint names a permission with
+  `[Authorize(Policy = PolicyNames.PermissionPrefix + PermissionKeys.X)]` (a constant, so channels can use it without
+  referencing Auth); `CanRead`, `CanWrite` and `CanManage` stand for the baseline permissions `data.read`, `data.write` and
+  `organization.manage`. Which role holds which permission is data the Site admin sets (`role_permissions`); `RolePermissions`
+  is only the factory default and the test oracle. A new permission is a constant in `PermissionKeys`, a seed row with its
+  default grants, a policy (registered from `PermissionKeys.All`) and a test. Services re-check with `tenant.HasPermission`.
 - Structured logging. Never log passwords, tokens, full email bodies, or paths that carry tokens (/t/c/{token}, /u/{token}).
 - Read configuration lazily (options pattern), not while registering services, so test overrides apply.
 - Tests: every service rule has a unit test; every query on a tenant table has an integration test that connects as
@@ -154,11 +167,11 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `005_email.sql` (was 002; the site admin, business model and Google sign-in scripts took 002 to 004), senders, contacts, lists, suppressions, CSV import |
+| 2 | `006_email.sql` (was 002; the site admin, business model, Google sign-in and menus-and-permissions scripts took 002 to 005), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; the rest (workspace switcher, invitations, PWA) is still to do |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do |
 | 7 | Frontend email screens |
 | 8 | CI, README, seed data, security review |
 
@@ -205,7 +218,8 @@ or was skipped, and any open question.
   the database, and a user who left the agency cannot refresh.
 - Policies live in Platform.Auth (`AuthPolicies`), their names in `Platform.Helpers.Constants.PolicyNames`: `CanRead` (any
   role), `CanWrite` (owner/admin/manager), `CanManage` (owner/admin: members and workspaces). *(The roles were replaced
-  later, see Business models and roles. The policy names stayed.)* The **fallback policy requires a
+  later, see Business models and roles. The policy names stayed. They became permission-based in Menus and permissions.)*
+  The **fallback policy requires a
   signed-in user with an agency**, so anything not marked `[AllowAnonymous]` is closed; as a side effect a request for an
   unknown route answers 401, not 404, when anonymous. Policies read the token's role claim, so a role change takes up to 15
   minutes to reach an existing access token; services re-check the role, and `/me` and refresh read it from the database.
@@ -262,7 +276,7 @@ or was skipped, and any open question.
   rules, and "tokens only in memory", are enforced by `web/tests/rules.test.js`. The access token lives only in the page;
   a reload restores the session from the cookie.
 - Migration numbering: this took `002`, so Phase 2's email script moved to `003_email.sql`; business models then took
-  `003` and then Google sign-in took `004`, so it is now `005_email.sql`.
+  `003`, Google sign-in took `004` and menus and permissions took `005`, so it is now `006_email.sql`.
 - Verified in a real browser (headless Edge over the DevTools protocol, throwaway profile): redirect to sign-in, wrong
   password message, dashboard at 360 px and 1280 px, paging, reload restores the session, sign out, not-found page, nothing
   in local/session storage, no horizontal scroll, no script errors (the only console entries are the expected 401s).
@@ -350,3 +364,94 @@ or was skipped, and any open question.
   roles can be tried only by inserting members in the database), an organization switcher for people in several
   organizations, linking Google to an existing account (needs email verification first), changing a password, and the real
   Google round trip, which needs your own Google credentials and was checked here only against a stand-in for Google.
+
+**Menus and permissions (requested by the user: "menu should load based on roles and permission, configured by the Site admin";
+an early slice of Phase 6). Status: steps 1 to 7 of 8 are built and tested (the API, the web shell with the sidebar, the
+`/workspaces` page and the two admin pages); step 8, the final review and the commit, waits for approval.** The approved plan has
+a build order; the starred steps (3, 5, 7) stop for approval.
+- Scope chosen by the user: both the member app and the site admin app get a sidebar from the tables; permissions are
+  **named permissions per business model and role** (the 8 allowed slots); links point to **built-in pages only** (a registry,
+  no external addresses); and the API itself authorizes through the permissions, which **changes the Phase 1 policies**
+  (approved by the user, who also asked that the JWT carry the permissions and that the menu come from a cache, not a
+  database read per page or call).
+- `005_menus_permissions.sql` (new tables only, no existing table changed): `permissions` (the catalog, `is_protected`),
+  `role_permissions` (one row per slot and key, **never deleted**: a revoke is `is_granted = false`, so a restart cannot undo
+  it; `ck_role_permissions_role_model` repeats the role and model table), `permission_state` (one row, the **permission
+  version**), `menu_pages` (the registry of built-in pages; primary key `(app, key)` because both apps have a `dashboard`) and
+  `menu_items` (a composite key puts a page only in its own app's menu; a locked item cannot be hidden or deleted).
+  Seeds are `ON CONFLICT DO NOTHING`; `menu_apply_default_items()` gives a page its default item once
+  (`menu_pages.default_item_created`), so a deleted item stays deleted and a page added by a later script appears once.
+  Catalog: `dashboard.view` (protected), `workspaces.view`, `workspaces.create`, `data.read`, `data.write`,
+  `organization.manage`; the seeded grants equal the old hard-coded rules, and an integration test compares them with
+  `RolePermissions.GrantedByDefault` for every slot and key (48 rows).
+- The version is a counter raised by a row-level trigger when a grant is inserted or its `is_granted` changes. Row-level, so
+  the seed that runs on every start does not raise it; a no-op update does not either. Writes go only through five
+  `site_admin_*` definer functions; `permission_snapshot()` (every grant and the version, in one statement) and
+  `menu_snapshot()` are the only reads the caches use, and need no signed-in user.
+- **The token carries the permissions.** A member's access token has one `permission` claim per key their role holds and `pv`,
+  the version they were read under; a site admin token has neither. `AuthService.BuildResult` is the one place a member token
+  is made. The grants are read **before** any write (a refresh rotates the old refresh token only after them), because
+  failing afterwards would lose the cookie and look like a stolen token being reused.
+- **Every request is checked in memory.** `PermissionVersionMiddleware` (after authentication, before authorization) answers a
+  member token whose `pv` is not the current version, or has none, with 401 `permissions_changed`; the web client already
+  refreshes and retries on a 401. Site admin tokens and `[AllowAnonymous]` endpoints are skipped. If the version cannot be read
+  the request fails (500), never passes. `PermissionAuthorizationHandler` then needs a user, an agency, a role this build
+  knows **and** the endpoint's permission claim. `ITenantContext.HasPermission` is how services re-check.
+- `PermissionService` (singleton) holds the matrix and the version in memory: 30 seconds, one load at a time, a change made
+  here calls `Invalidate()` at once, and a load that began before an `Invalidate()` is never served as current. Another
+  instance learns of a change within the 30 seconds. Roles in a token still lag a membership change by up to 15 minutes, as in
+  Phase 1 (unchanged). The first run of this version refuses every token issued before it, once.
+- `CanRead`, `CanWrite` and `CanManage` keep their names and stand for `data.read`, `data.write` and `organization.manage`;
+  `WorkspacesController` uses `workspaces.view` and `workspaces.create` (`insufficient_role` became `insufficient_permission`).
+  `RolePermissions` stays as the factory default and the test oracle (`NamesWhere` was removed).
+- **The menu endpoints.** `GET /v1/menu` (any signed-in member) and `GET /v1/site/menu` (site admin) answer `{items:[{id, pageKey,
+  label, icon, path}], permissions:[...]}` from `MenuCache` (60 seconds; a menu edit made here calls `Invalidate()`) and, for a
+  member, the permissions **in the token**: no database read per call, proved by a test that wraps the repositories in counters.
+  An item shows when it is visible and either needs no permission or the token carries it (`MenuVisibility`, pure). Hiding an
+  item is not access control; the endpoints check the same permissions. The member menu never holds an admin page and the other
+  way round. A site admin who was demoted can still read the admin sidebar until their token expires (configuration, not
+  secret); every other `/v1/site` route re-checks `site_admins`.
+- **The Site admin's editors** (`/v1/site/menus/{menu}` and `/v1/site/permissions`, policy `SiteAdmin`, session rate limit):
+  `GET` a menu (all items, the pages that could still be added, the icons), `POST .../items`, `PUT .../items/{id}`, `DELETE
+  .../items/{id}`, `PUT .../order` (the full list of ids, once each), `GET /v1/site/permissions` (the matrix), `PUT
+  /v1/site/permissions/{key}/grants`. Errors: `menu_not_found`, `menu_item_not_found`, `page_not_found`, `page_already_in_menu`,
+  `menu_item_locked`, `menu_changed` (a stale order), `permission_not_found`, `permission_protected`, `invalid_slot`. An item
+  addressed through the wrong menu is "not found". Reads check `site_admins` on their connection and writes are the definer
+  functions, so a demoted site admin is refused at once. Label: trimmed, 1 to 60 characters, no control characters; the icon
+  must be in `MenuIcons.All` (a test compares it with the seeded icons, step 6 will compare it with the web client's drawings).
+  After every write attempt the matching cache is invalidated, even when the attempt failed.
+- `SnapshotCache<T>` is the one implementation of "hold a small snapshot for a while" under both caches (see its summary for the
+  rules). Hosts without a database get `DefaultGrantsPermissionService` and `DefaultMenuCache` from `ApiHostFactory`, so the
+  authorization tests stay database-free.
+- **The web client.** `<app-shell>` (`web/js/components`) is the frame of every page behind sign-in: the header, the sidebar the
+  session holds, and the page. It is made once in `main.js` and reused; sign-in and sign-up stay bare, and the shell leaves the
+  document (and stops listening to the session) when they show. The pages no longer build their own header; the dashboards
+  render content only. Narrower than 720 px the sidebar is a drawer (menu button, Close button, Escape, a tap outside, or
+  choosing a link closes it; while open the header and the page are `inert`, and while closed the drawer is, so Tab never
+  reaches an off-screen link); from 720 px it is a column and the button is gone. The sidebar colours are tokens built from the
+  page's own, so dark mode and the cream palette need nothing of their own. Icons are drawn with `createElementNS` from a fixed
+  list (`core/icons.js`); a test compares it with `MenuIcons.cs`.
+- **The client holds the menu and the permissions in memory** (`session.state.menu` and `.permissions`), read when the person
+  signs in or the page restores the session, and again each time a refresh gives the page a new token (`api.onTokenRefreshed`),
+  which is when a change the Site admin made reaches them. Moving between pages reads memory, never the server; nothing is
+  written to storage. A member whose menu cannot be read cannot sign in (without permissions the page cannot tell which pages
+  are theirs); the site admin app falls back to the three pages that repair a menu, so a broken menu can always be fixed.
+  `parseMenu` drops any item whose address is not a plain address of this site (`isSafePath`: no scheme, no host, no `//`, no dot).
+- **Route guard.** A route may name a `permission`; `resolveNavigation` answers `forbidden` unless the session's list holds it (a
+  missing list holds nothing). The router re-checks when the permissions change after a renewed token, and re-renders only if
+  that changes what the open address shows, so nothing a person is typing is thrown away. A person who loses a permission sees
+  "You do not have access to this page" (inside the shell) the next time their page makes a request, and the link leaves
+  the sidebar. The page's own API calls are refused by the server in any case.
+- **Pages.** `/workspaces` (the dashboard's workspaces list and add form moved there; the form needs `workspaces.create`),
+  `/admin/menus` (one menu at a time: Up and Down buttons, never only a drag; Hide/Show; Edit with a draft that survives a failed
+  save; Delete with a confirmation; an add form with the pages not yet in the menu; one change at a time, all buttons off while
+  it runs) and `/admin/permissions` (a fieldset per permission, a checkbox per role grouped by kind of organization, saved at
+  once, rolled back on failure; the protected permission is ticked and disabled). `core/permission-keys.js` is a leaf module with
+  the keys and `hasPermission`; a test compares the keys with `PermissionKeys.cs` and another compares the seeded pages with the router.
+- Checked in a real browser (headless Edge over the DevTools protocol, real mouse and key events, a throwaway database and API
+  copy, never the development database): the drawer at 360 px (open, Escape, tap outside, Close, link), the column at 1280 px,
+  dark mode, every editor action, the permission toggles and a member losing a permission, sign-out and sign-in again, no
+  horizontal scroll at 360 px, controls at least 44 px, no script errors. The headless browser shows a 15 px scrollbar, so a tap
+  point meant for the page beside the drawer must stay clear of the right edge.
+- Defaults chosen in the plan: both Dashboard items are locked, an item's page cannot be changed (delete and add again), and a
+  rename or reorder reaches other people when they next load the page or renew their token, not instantly.

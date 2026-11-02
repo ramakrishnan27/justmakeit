@@ -72,14 +72,63 @@ public sealed class RolePermissionsTests
         Assert.False(RolePermissions.TryParse(value, out _));
     }
 
+    // The factory defaults: 005_menus_permissions.sql seeds exactly this matrix and an integration test
+    // compares the two, so today's behaviour does not change when the policies start reading the tables.
+    [Theory]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.DashboardView, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.DashboardView, true)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.DashboardView, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.DashboardView, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.WorkspacesView, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.WorkspacesView, true)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.WorkspacesView, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.WorkspacesView, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.WorkspacesCreate, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.WorkspacesCreate, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.WorkspacesCreate, false)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.WorkspacesCreate, false)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.DataRead, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.DataRead, true)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.DataRead, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.DataRead, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.DataWrite, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.DataWrite, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.DataWrite, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.DataWrite, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.OrganizationManage, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.OrganizationManage, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.OrganizationManage, false)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.OrganizationManage, false)]
+    public void GrantedByDefault_IsTheMatrixThatTheDatabaseIsSeededWith(OrganizationRole role, string key, bool expected) =>
+        Assert.Equal(expected, role.GrantedByDefault(key));
+
     [Fact]
-    public void NamesWhere_ListsTheStoredNamesOfTheAllowedRoles()
+    public void GrantedByDefault_HasAnAnswerForEveryRoleAndEveryKey_SoANewKeyCannotBeForgotten()
     {
-        Assert.Equal(["organizationadmin"], RolePermissions.NamesWhere(RolePermissions.CanManage));
-        Assert.Equal(
-            ["organizationadmin", "marketingmanager", "contentwriter"], RolePermissions.NamesWhere(RolePermissions.CanWrite));
-        Assert.Equal(
-            ["organizationadmin", "clientmanager", "marketingmanager", "contentwriter"],
-            RolePermissions.NamesWhere(RolePermissions.CanRead));
+        foreach (var role in Enum.GetValues<OrganizationRole>())
+        {
+            foreach (var key in PermissionKeys.All)
+            {
+                var ex = Record.Exception(() => role.GrantedByDefault(key));
+                Assert.Null(ex);
+            }
+        }
     }
+
+    [Fact]
+    public void GrantedByDefault_GivesAProtectedPermissionToEveryRole()
+    {
+        foreach (var key in PermissionKeys.All.Where(PermissionKeys.IsProtected))
+        {
+            Assert.All(Enum.GetValues<OrganizationRole>(), role => Assert.True(role.GrantedByDefault(key)));
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("workspaces")]
+    [InlineData("Dashboard.View")]
+    [InlineData("content.write")]
+    public void GrantedByDefault_RefusesAKeyThatIsNotInTheCatalog(string key) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => OrganizationRole.OrganizationAdmin.GrantedByDefault(key));
 }

@@ -8,11 +8,46 @@ namespace Platform.IntegrationTests.Api;
 
 /// <summary>
 /// Mints access tokens the way the API does, so a test can act as any user, agency and role without
-/// going through login. The role claim is the same lower-case name the real issuer writes.
+/// going through login. The role claim is the same lower-case name the real issuer writes, and the token
+/// carries the permissions a role holds in a fresh installation unless the test names others.
 /// </summary>
 public static class TestAccessTokens
 {
-    public static string Create(string signingKey, Guid userId, Guid agencyId, OrganizationRole role) =>
+    /// <param name="permissions">The permission keys to put in the token; the role's defaults when null.</param>
+    /// <param name="permissionVersion">The permission version the token claims to have been issued under.</param>
+    public static string Create(
+        string signingKey,
+        Guid userId,
+        Guid agencyId,
+        OrganizationRole role,
+        IEnumerable<string>? permissions = null,
+        long permissionVersion = DefaultGrantsPermissionService.Version) =>
+        Sign(signingKey, new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.AgencyId] = agencyId.ToString(),
+            [ClaimNames.Role] = role.ToDb(),
+            [ClaimNames.Permission] = (permissions ?? DefaultGrantsPermissionService.DefaultKeys(role)).ToArray(),
+            [ClaimNames.PermissionVersion] = permissionVersion
+        });
+
+    /// <summary>A member token whose role claim is any text, for a role this build does not know.</summary>
+    public static string CreateWithRoleName(
+        string signingKey, Guid userId, Guid agencyId, string roleName, IEnumerable<string> permissions, long permissionVersion) =>
+        Sign(signingKey, new Dictionary<string, object>
+        {
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.AgencyId] = agencyId.ToString(),
+            [ClaimNames.Role] = roleName,
+            [ClaimNames.Permission] = permissions.ToArray(),
+            [ClaimNames.PermissionVersion] = permissionVersion
+        });
+
+    /// <summary>
+    /// A member token from before permissions travelled in the token: the user, agency and role, and
+    /// neither permissions nor a version. The API must answer it 401 so it is refreshed.
+    /// </summary>
+    public static string CreateWithoutPermissions(string signingKey, Guid userId, Guid agencyId, OrganizationRole role) =>
         Sign(signingKey, new Dictionary<string, object>
         {
             [ClaimNames.UserId] = userId.ToString(),

@@ -1,5 +1,6 @@
 using System.Net;
 using Dapper;
+using Microsoft.Extensions.DependencyInjection;
 using Platform.Infrastructure.Data;
 using Platform.IntegrationTests.Infrastructure;
 
@@ -18,7 +19,12 @@ public abstract class AuthApiTestBase(PostgresFixture postgres) : IAsyncLifetime
     public async Task InitializeAsync()
     {
         DapperConfiguration.Configure();
-        Host = await ApiTestHost.StartWithDatabaseAsync(Postgres);
+        Host = await ApiTestHost.StartWithDatabaseAsync(Postgres, configureServices: ConfigureServices);
+    }
+
+    /// <summary>Lets a test class replace or wrap a service of the hosted API, for example to count what it reads.</summary>
+    protected virtual void ConfigureServices(IServiceCollection services)
+    {
     }
 
     public async Task DisposeAsync() => await Host.DisposeAsync();

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,6 +30,19 @@ public static class AuthModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IPasswordHasher>(_ => new Pbkdf2PasswordHasher());
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
+
+        // Authorization reads the permissions in the access token; the matrix and its version are held
+        // in memory here and read from the database at most once per PermissionService.CacheLifetime.
+        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddSingleton<IPermissionService, PermissionService>();
+        services.AddScoped<IPermissionRepository, PermissionRepository>();
+        services.AddScoped<IPermissionAdminService, PermissionAdminService>();
+
+        // The menus: held in memory like the permissions, so showing one reads no database.
+        services.AddSingleton<IMenuCache, MenuCache>();
+        services.AddScoped<IMenuRepository, MenuRepository>();
+        services.AddScoped<IMenuService, MenuService>();
+        services.AddScoped<IMenuAdminService, MenuAdminService>();
 
         services.AddScoped<IAccountRepository, AccountRepository>();
         services.AddScoped<IAgencyRepository, AgencyRepository>();

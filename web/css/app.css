@@ -191,21 +191,11 @@ input:focus-visible { border-color: var(--focus); }
   border-bottom: 1px solid var(--border);
 }
 
-.header-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding-top: 10px;
-  padding-bottom: 10px;
-}
-
 .header-actions { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .user-email { color: var(--muted); font-size: 0.875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14ch; }
 
 .page { padding-top: 24px; padding-bottom: 48px; }
-.page > .muted { margin: 4px 0 24px; }
+.page h1 + .muted { margin: 4px 0 24px; }
 .page section { margin-bottom: 32px; }
 
 .badge {
@@ -362,4 +352,211 @@ fieldset.field label.choice {
 @media (min-width: 720px) {
   .soon-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- The app shell: header, sidebar and page ----------
+   Narrower than 720 px the sidebar is a drawer, opened by the menu button; from 720 px it is a column beside the page.
+   The colours come from the page's own tokens, so the dark scheme and the cream palette need nothing of their own. */
+
+:root {
+  --sidebar-width: 15rem;
+  --sidebar-bg: var(--surface);
+  --sidebar-border: var(--border);
+  --sidebar-text: var(--text);
+  --sidebar-hover-bg: var(--surface-2);
+  --sidebar-active-bg: var(--accent-bg);
+  --sidebar-active-text: var(--accent-text);
+  --scrim: rgb(16 24 40 / 50%);
+  --drawer-shadow: 0 8px 24px rgb(16 24 40 / 24%);
+  --shell-header: 61px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --scrim: rgb(0 0 0 / 62%);
+    --drawer-shadow: 0 8px 24px rgb(0 0 0 / 60%);
+  }
+}
+
+/* A custom element is inline until told otherwise. */
+app-shell,
+member-dashboard,
+member-workspaces,
+admin-dashboard,
+admin-menus,
+admin-permissions { display: block; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.shell-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--shell-header);
+  padding: 8px 16px;
+}
+.shell-bar .brand { flex: 1; min-width: 0; }
+.shell-bar .user-email { display: none; }
+
+.menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.menu-toggle:hover { background: var(--surface-2); }
+
+.shell-main { min-width: 0; }
+
+.shell-nav {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(var(--sidebar-width), 85vw);
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s linear 0.2s;
+}
+.shell-nav.is-open {
+  transform: none;
+  visibility: visible;
+  box-shadow: var(--drawer-shadow);
+  transition: transform 0.2s ease;
+}
+
+.shell-scrim { position: fixed; inset: 0; z-index: 7; background: var(--scrim); }
+.shell-scrim[hidden] { display: none; }
+
+.shell-close { align-self: flex-end; }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.nav-empty { padding: 8px 12px; }
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text);
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.nav-link:hover { background: var(--sidebar-hover-bg); }
+.nav-link[aria-current="page"] { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); }
+
+@media (min-width: 640px) {
+  .shell-bar .user-email { display: inline; }
+}
+
+@media (min-width: 720px) {
+  .shell-body {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .shell-nav {
+    position: sticky;
+    top: var(--shell-header);
+    z-index: auto;
+    width: auto;
+    height: calc(100dvh - var(--shell-header));
+    transform: none;
+    visibility: visible;
+    transition: none;
+  }
+
+  .menu-toggle,
+  .shell-close,
+  .shell-scrim { display: none; }
+}
+
+/* ---------- Selects, checkboxes and the Site admin's editors ---------- */
+
+select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+select:focus-visible { border-color: var(--focus); }
+
+input[type="checkbox"] { width: 1.25rem; height: 1.25rem; min-height: 0; padding: 0; margin: 0; accent-color: var(--primary); flex: none; }
+
+.button-small { padding: 0 12px; font-size: 0.9375rem; }
+
+.form-status { margin-bottom: 12px; color: var(--paid-text); font-weight: 600; }
+.form-status:empty { display: none; }
+
+.plain-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+.menu-items { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.menu-item { display: grid; gap: 8px; padding: 14px; }
+.menu-item.is-hidden { border-style: dashed; }
+.menu-item.is-hidden .menu-item-label { color: var(--muted); }
+.menu-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.menu-item-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.menu-item-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.menu-item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.menu-item-actions p { flex: 1 1 100%; }
+
+.permission-list { display: grid; gap: 12px; }
+fieldset.permission { margin: 0; min-width: 0; }
+fieldset.permission legend { padding: 0 6px; font-weight: 700; }
+.grant-groups { display: grid; gap: 12px; margin-top: 12px; }
+.grant-group { border-top: 1px solid var(--border); padding-top: 8px; }
+.grant-model { margin-bottom: 4px; color: var(--muted); font-size: 0.875rem; font-weight: 600; }
+label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 400; cursor: pointer; }
+
+.permission-chips { margin: 12px 0; }
+.chip-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (min-width: 720px) {
+  .grant-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grant-group { border-top: 0; padding-top: 0; }
 }

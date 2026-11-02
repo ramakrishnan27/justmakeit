@@ -5,7 +5,7 @@ using Platform.Helpers.Tenancy;
 namespace Platform.Api.Middleware;
 
 /// <summary>
-/// Copies the agency, user and role from the validated access token into the scoped
+/// Copies the agency, user, role and permissions from the validated access token into the scoped
 /// <see cref="TenantContext"/>, which the connection factory hands to the database. Without a valid
 /// token the context stays empty and row-level security matches nothing.
 /// </summary>
@@ -19,7 +19,8 @@ public sealed class TenantContextMiddleware(RequestDelegate next)
             tenant.Set(
                 ParseGuid(user.FindFirstValue(ClaimNames.AgencyId)),
                 ParseGuid(user.FindFirstValue(ClaimNames.UserId)),
-                user.FindFirstValue(ClaimNames.Role));
+                user.FindFirstValue(ClaimNames.Role),
+                user.FindAll(ClaimNames.Permission).Select(claim => claim.Value));
         }
 
         return next(context);

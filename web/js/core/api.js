@@ -25,6 +25,7 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
   /** @type {Promise<boolean> | null} */
   let refreshInFlight = null;
   const expiredListeners = new Set();
+  const refreshedListeners = new Set();
 
   function send(path, { method = 'GET', body, token = null } = {}) {
     const headers = { Accept: 'application/json' };
@@ -55,6 +56,17 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
     return new ApiError(response.status, message, { code: problem?.code ?? null, errors: problem?.errors ?? null });
   }
 
+  // A listener that throws must not turn a good refresh into a failed one.
+  function announceRefresh() {
+    for (const listener of refreshedListeners) {
+      try {
+        listener();
+      } catch {
+        // The listener's own problem; the new token is held either way.
+      }
+    }
+  }
+
   /**
    * Gets a new access token from the refresh cookie. Concurrent callers share one request, because the
    * refresh token rotates: a second request with the same cookie would look like a stolen token.
@@ -70,6 +82,9 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
             return false;
           }
           accessToken = (await response.json()).accessToken ?? null;
+          if (accessToken !== null) {
+            announceRefresh();
+          }
           return accessToken !== null;
         } catch {
           accessToken = null;
@@ -114,6 +129,14 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
     onSessionExpired: (listener) => {
       expiredListeners.add(listener);
       return () => expiredListeners.delete(listener);
+    },
+    /**
+     * Called each time a refresh gives the page a new access token, whoever asked for it. The new token carries the
+     * permissions as they are now, so the session reloads its menu then.
+     */
+    onTokenRefreshed: (listener) => {
+      refreshedListeners.add(listener);
+      return () => refreshedListeners.delete(listener);
     },
   };
 }

@@ -18,6 +18,7 @@ public sealed class AuthService(
     IRefreshTokenRepository refreshTokens,
     IPasswordHasher passwordHasher,
     IAccessTokenIssuer accessTokens,
+    IPermissionService permissions,
     ITenantContext tenant,
     IOptions<JwtSettings> jwtOptions,
     TimeProvider time,
@@ -76,6 +77,9 @@ public sealed class AuthService(
 
     private async Task<AuthResult> CreateAccountAndStartSessionAsync(NewAccount account, CancellationToken cancellationToken)
     {
+        // Read before anything is written, so a failure here leaves no half-made account behind.
+        var grants = await permissions.GetGrantsAsync(account.BusinessModel, account.Role, cancellationToken);
+
         if (!await accounts.CreateAccountAsync(account, cancellationToken))
         {
             throw new ConflictException("An account with this email already exists.", "email_taken");
@@ -83,7 +87,7 @@ public sealed class AuthService(
 
         logger.LogInformation(
             "Registered user {UserId} with new {BusinessModel} organization {AgencyId}", account.UserId, account.BusinessModel, account.AgencyId);
-        return await StartSessionAsync(account.UserId, account.AgencyId, account.Role, cancellationToken);
+        return await StartSessionAsync(account.UserId, account.AgencyId, account.Role, grants, cancellationToken);
     }
 
     public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -122,10 +126,12 @@ public sealed class AuthService(
               ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member")
             : userMemberships[0];
 
+        var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
+
         await memberships.TouchAsync(membership.AgencyId, userId, time.GetUtcNow(), cancellationToken);
 
         logger.LogInformation("User {UserId} signed in to agency {AgencyId}", userId, membership.AgencyId);
-        return await StartSessionAsync(userId, membership.AgencyId, membership.Role, cancellationToken);
+        return await StartSessionAsync(userId, membership.AgencyId, membership.Role, grants, cancellationToken);
     }
 
     public async Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken cancellationToken)
@@ -155,6 +161,11 @@ public sealed class AuthService(
             throw InvalidRefreshToken();
         }
 
+        // The permissions come from the database too. They are read before the old token is rotated: if
+        // reading them failed afterwards, the cookie would be lost with the rotated token and the next
+        // attempt would look like a stolen token being reused.
+        var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
+
         var (rawToken, replacement) = NewRefreshToken(presented.UserId, presented.AgencyId, now);
         if (!await refreshTokens.RotateAsync(presented.Id, replacement, now, cancellationToken))
         {
@@ -163,7 +174,7 @@ public sealed class AuthService(
             throw InvalidRefreshToken();
         }
 
-        return BuildResult(presented.UserId, presented.AgencyId, membership.Role, rawToken, replacement.ExpiresAt);
+        return BuildResult(presented.UserId, presented.AgencyId, membership.Role, grants, rawToken, replacement.ExpiresAt);
     }
 
     public async Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken)
@@ -188,6 +199,8 @@ public sealed class AuthService(
         var membership = await memberships.FindAsync(userId, targetAgencyId, cancellationToken)
                          ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member");
 
+        var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
+
         var now = time.GetUtcNow();
         await memberships.TouchAsync(targetAgencyId, userId, now, cancellationToken);
 
@@ -200,7 +213,7 @@ public sealed class AuthService(
         }
 
         logger.LogInformation("User {UserId} switched to agency {AgencyId}", userId, targetAgencyId);
-        return await StartSessionAsync(userId, targetAgencyId, membership.Role, cancellationToken);
+        return await StartSessionAsync(userId, targetAgencyId, membership.Role, grants, cancellationToken);
     }
 
     public async Task<MeResponse> GetMeAsync(CancellationToken cancellationToken)
@@ -225,11 +238,12 @@ public sealed class AuthService(
             all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.BusinessModel, m.Role)).ToList());
     }
 
-    private async Task<AuthResult> StartSessionAsync(Guid userId, Guid agencyId, OrganizationRole role, CancellationToken cancellationToken)
+    private async Task<AuthResult> StartSessionAsync(
+        Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants, CancellationToken cancellationToken)
     {
         var (rawToken, token) = NewRefreshToken(userId, agencyId, time.GetUtcNow());
         await refreshTokens.InsertAsync(token, cancellationToken);
-        return BuildResult(userId, agencyId, role, rawToken, token.ExpiresAt);
+        return BuildResult(userId, agencyId, role, grants, rawToken, token.ExpiresAt);
     }
 
     private (string Raw, NewRefreshToken Stored) NewRefreshToken(Guid userId, Guid agencyId, DateTimeOffset now)
@@ -241,9 +255,12 @@ public sealed class AuthService(
         return (raw, stored);
     }
 
-    private AuthResult BuildResult(Guid userId, Guid agencyId, OrganizationRole role, string rawRefreshToken, DateTimeOffset refreshExpiresAt)
+    // The one place a member's access token is made: register, login, refresh, switch-agency and
+    // Google all end here, each with the permissions its caller read for the member's role.
+    private AuthResult BuildResult(
+        Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants, string rawRefreshToken, DateTimeOffset refreshExpiresAt)
     {
-        var access = accessTokens.Issue(userId, agencyId, role);
+        var access = accessTokens.Issue(userId, agencyId, role, grants);
         var expiresIn = jwtOptions.Value.AccessTokenMinutes * 60;
         return new AuthResult(new TokenResponse(access.Value, TokenResponse.BearerType, expiresIn), rawRefreshToken, refreshExpiresAt);
     }

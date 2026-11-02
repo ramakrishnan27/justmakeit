@@ -3,18 +3,31 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Auth.Services;
 using Platform.Helpers.Constants;
+using Platform.Infrastructure.Data;
 
 namespace Platform.Auth.Tests;
 
-/// <summary>The role rules, evaluated by the real authorization service with the policies the API registers.</summary>
+/// <summary>
+/// The authorization rules, evaluated by the real authorization service with the policies and the handler
+/// the API registers. A member's rights are the permissions in the token; these tests build tokens the way
+/// the issuer does, with the permissions a role holds by default unless a test says otherwise.
+/// </summary>
 public sealed class AuthPoliciesTests
 {
     private readonly ServiceProvider _provider = new ServiceCollection()
         .AddLogging()
         .AddAuthorization(AuthPolicies.Configure)
+        .AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>()
         .BuildServiceProvider();
 
-    private static ClaimsPrincipal SignedIn(string? role, bool withAgency = true, bool withUser = true)
+    /// <summary>What the issuer puts in a role's token in a fresh installation.</summary>
+    private static string[] DefaultPermissions(string? role) =>
+        RolePermissions.TryParse(role, out var parsed)
+            ? PermissionKeys.All.Where(key => parsed.GrantedByDefault(key)).ToArray()
+            : PermissionKeys.All.ToArray(); // a role this build does not know: every key, to show the role check matters
+
+    private static ClaimsPrincipal SignedIn(
+        string? role, bool withAgency = true, bool withUser = true, IEnumerable<string>? permissions = null)
     {
         var claims = new List<Claim>();
         if (withUser)
@@ -31,6 +44,9 @@ public sealed class AuthPoliciesTests
         {
             claims.Add(new Claim(ClaimNames.Role, role));
         }
+
+        claims.AddRange((permissions ?? DefaultPermissions(role)).Select(key => new Claim(ClaimNames.Permission, key)));
+        claims.Add(new Claim(ClaimNames.PermissionVersion, "1"));
 
         // The same claim types the JWT scheme is configured with.
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test", ClaimNames.UserId, ClaimNames.Role));
@@ -130,6 +146,140 @@ public sealed class AuthPoliciesTests
         Assert.True((await authorization.AuthorizeAsync(SignedIn("clientmanager"), null, fallback)).Succeeded);
         Assert.False((await authorization.AuthorizeAsync(Anonymous(), null, fallback)).Succeeded);
         Assert.False((await authorization.AuthorizeAsync(SignedIn("clientmanager", withAgency: false), null, fallback)).Succeeded);
+    }
+
+    // --- Permissions -------------------------------------------------------------------------
+
+    public static TheoryData<string, string> EveryRoleAndEveryPermission()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var role in Enum.GetValues<OrganizationRole>())
+        {
+            foreach (var key in PermissionKeys.All)
+            {
+                data.Add(role.ToDb(), key);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryRoleAndEveryPermission))]
+    public async Task APermissionPolicy_AllowsExactlyTheRolesThatHoldItByDefault(string role, string key)
+    {
+        Assert.Equal(
+            RolePermissions.TryParse(role, out var parsed) && parsed.GrantedByDefault(key),
+            await AllowedAsync(SignedIn(role), PolicyNames.PermissionPrefix + key));
+    }
+
+    [Fact]
+    public async Task EveryPermissionInTheCatalog_HasAPolicy()
+    {
+        var policies = _provider.GetRequiredService<IAuthorizationPolicyProvider>();
+
+        foreach (var key in PermissionKeys.All)
+        {
+            Assert.NotNull(await policies.GetPolicyAsync(PolicyNames.PermissionPrefix + key));
+        }
+    }
+
+    [Fact]
+    public async Task APolicyNamedForAPermissionThatDoesNotExist_FailsLoudly_InsteadOfAllowingOrDenying()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AllowedAsync(SignedIn("organizationadmin"), PolicyNames.PermissionPrefix + "workspaces.crate"));
+    }
+
+    [Fact]
+    public async Task ARevokedPermission_IsDenied_EvenToTheRoleThatHadItByDefault()
+    {
+        // What the Site admin's change looks like in a token issued afterwards.
+        var withoutCreate = PermissionKeys.All.Where(key => key != PermissionKeys.WorkspacesCreate);
+        var token = SignedIn("organizationadmin", permissions: withoutCreate);
+
+        Assert.False(await AllowedAsync(token, PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesCreate));
+        Assert.True(await AllowedAsync(token, PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesView));
+        Assert.True(await AllowedAsync(token, PolicyNames.CanManage)); // organization.manage was not revoked
+    }
+
+    [Fact]
+    public async Task AGrantedPermission_IsAllowed_ToARoleThatDidNotHaveItByDefault()
+    {
+        var token = SignedIn("contentwriter", permissions: [PermissionKeys.DashboardView, PermissionKeys.WorkspacesCreate]);
+
+        Assert.True(await AllowedAsync(token, PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesCreate));
+        Assert.False(await AllowedAsync(token, PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesView));
+    }
+
+    [Theory]
+    [InlineData(PolicyNames.CanRead, PermissionKeys.DataRead)]
+    [InlineData(PolicyNames.CanWrite, PermissionKeys.DataWrite)]
+    [InlineData(PolicyNames.CanManage, PermissionKeys.OrganizationManage)]
+    public async Task TheGeneralPolicies_StandForTheirBaselinePermission(string policy, string baseline)
+    {
+        Assert.True(await AllowedAsync(SignedIn("clientmanager", permissions: [baseline]), policy));
+        Assert.False(await AllowedAsync(
+            SignedIn("organizationadmin", permissions: PermissionKeys.All.Where(key => key != baseline)), policy));
+    }
+
+    [Fact]
+    public async Task ATokenWithAValidRoleButNoPermissions_PassesNoPermissionPolicy()
+    {
+        var token = SignedIn("organizationadmin", permissions: []);
+
+        foreach (var key in PermissionKeys.All)
+        {
+            Assert.False(await AllowedAsync(token, PolicyNames.PermissionPrefix + key));
+        }
+
+        Assert.False(await AllowedAsync(token, PolicyNames.CanRead));
+    }
+
+    [Theory]
+    [InlineData("Workspaces.View")]
+    [InlineData("workspaces.view ")]
+    [InlineData("workspaces.*")]
+    [InlineData("*")]
+    [InlineData("")]
+    public async Task APermissionClaim_MustMatchTheKeyExactly(string claimValue)
+    {
+        var token = SignedIn("organizationadmin", permissions: [claimValue]);
+
+        Assert.False(await AllowedAsync(token, PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesView));
+    }
+
+    [Fact]
+    public async Task APermissionAlone_IsNotEnough_WithoutAKnownRole()
+    {
+        Assert.False(await AllowedAsync(SignedIn(role: null, permissions: PermissionKeys.All), PolicyNames.PermissionPrefix + PermissionKeys.DashboardView));
+        Assert.False(await AllowedAsync(SignedIn("owner", permissions: PermissionKeys.All), PolicyNames.PermissionPrefix + PermissionKeys.DashboardView));
+    }
+
+    [Fact]
+    public async Task APermissionAlone_IsNotEnough_WithoutAnAgencyOrAUser()
+    {
+        var policy = PolicyNames.PermissionPrefix + PermissionKeys.DashboardView;
+
+        Assert.False(await AllowedAsync(SignedIn("organizationadmin", withAgency: false), policy));
+        Assert.False(await AllowedAsync(SignedIn("organizationadmin", withUser: false), policy));
+    }
+
+    [Fact]
+    public async Task ASiteAdminToken_PassesNoPermissionPolicy_EvenIfItWereToCarryTheClaims()
+    {
+        var siteAdmin = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim(ClaimNames.UserId, Guid.NewGuid().ToString()),
+                new Claim(ClaimNames.Role, RoleNames.SiteAdmin),
+                .. PermissionKeys.All.Select(key => new Claim(ClaimNames.Permission, key))
+            ],
+            "test", ClaimNames.UserId, ClaimNames.Role));
+
+        foreach (var key in PermissionKeys.All)
+        {
+            Assert.False(await AllowedAsync(siteAdmin, PolicyNames.PermissionPrefix + key));
+        }
     }
 
     // --- Site admin --------------------------------------------------------------------------

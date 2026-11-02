@@ -34,11 +34,15 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     [InlineData("/admin")]
     [InlineData("/admin/")]
     [InlineData("/admin/login")]
+    [InlineData("/admin/menus")]
+    [InlineData("/admin/permissions")]
     [InlineData("/admin/anything/deeper/than/that")]
     [InlineData("/login")]
     [InlineData("/register")]
     [InlineData("/dashboard")]
     [InlineData("/dashboard/")]
+    [InlineData("/workspaces")]
+    [InlineData("/workspaces/")]
     public async Task EveryClientSideAddress_AnswersWithTheAppShell_ToAVisitorWhoIsNotSignedIn(string path)
     {
         var response = await _host.GetAsync(path);
@@ -60,6 +64,9 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         Assert.Equal(root, await (await _host.GetAsync("/login")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/register")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/dashboard")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/workspaces")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/admin/menus")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/admin/permissions")).Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -69,12 +76,14 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         var elsewhere = await _host.GetAsync("/not-admin/login");
         var authTypo = await _host.GetAsync("/v1/auth/googl/start");
         var deeper = await _host.GetAsync("/dashboard/settings");
+        var deeperWorkspaces = await _host.GetAsync("/workspaces/anything");
 
         Assert.NotEqual("text/html", typo.Content.Headers.ContentType?.MediaType);
         Assert.Equal(HttpStatusCode.Unauthorized, typo.StatusCode);
         Assert.NotEqual("text/html", elsewhere.Content.Headers.ContentType?.MediaType);
         Assert.NotEqual("text/html", authTypo.Content.Headers.ContentType?.MediaType);
         Assert.NotEqual("text/html", deeper.Content.Headers.ContentType?.MediaType);
+        Assert.NotEqual("text/html", deeperWorkspaces.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]
@@ -149,14 +158,19 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
             }
         }
 
-        // The graph is the whole client: the entry point, the core modules and both pages.
+        // The graph is the whole client: the entry point, the core modules, the app shell and every page.
         foreach (var expected in new[]
                  {
                      "/js/main.js", "/js/core/api.js", "/js/core/session.js", "/js/core/router.js", "/js/core/jwt.js",
                      "/js/core/format.js", "/js/core/messages.js", "/js/core/dom.js",
                      "/js/pages/admin-login.js", "/js/pages/admin-dashboard.js",
+                     "/js/pages/admin-menus.js", "/js/pages/admin-permissions.js",
                      "/js/pages/member-login.js", "/js/pages/member-register.js", "/js/pages/member-dashboard.js",
-                     "/js/core/roles.js", "/js/core/google.js"
+                     "/js/pages/member-workspaces.js",
+                     "/js/components/app-shell.js",
+                     "/js/core/roles.js", "/js/core/google.js",
+                     "/js/core/menu.js", "/js/core/menu-admin.js", "/js/core/icons.js",
+                     "/js/core/permissions.js", "/js/core/permission-keys.js"
                  })
         {
             Assert.Contains(expected, seen);
@@ -169,7 +183,8 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         // The fallback authorization policy must not close the page that lets a person sign in.
         foreach (var path in new[]
                  {
-                     "/", "/admin", "/admin/login", "/login", "/register", "/dashboard", "/css/app.css", "/js/main.js",
+                     "/", "/admin", "/admin/login", "/admin/menus", "/admin/permissions", "/login", "/register", "/dashboard", "/workspaces",
+                     "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
                      "/js/pages/admin-login.js", "/js/pages/member-login.js", "/js/pages/member-register.js"
                  })
         {

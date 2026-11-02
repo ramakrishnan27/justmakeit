@@ -21,7 +21,7 @@ namespace Platform.Auth.Controllers;
 [Produces("application/json")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 [EnableRateLimiting(AuthRateLimitPolicies.Session)]
-public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboardService dashboard) : ControllerBase
+public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboardService dashboard, IMenuService menus) : ControllerBase
 {
     /// <summary>Signs a site admin in. Anyone else gets the same 401 as a wrong password.</summary>
     [HttpPost("login")]
@@ -58,6 +58,13 @@ public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboa
     [ProducesResponseType<SiteMeResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<SiteMeResponse>> Me(CancellationToken cancellationToken) =>
         await auth.GetMeAsync(cancellationToken);
+
+    /// <summary>The site admin sidebar: the visible items of the admin menu. Read from memory, like the member menu.</summary>
+    [HttpGet("menu")]
+    [Authorize(Policy = PolicyNames.SiteAdmin)]
+    [ProducesResponseType<MenuResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<MenuResponse>> Menu(CancellationToken cancellationToken) =>
+        await menus.GetSiteAdminMenuAsync(cancellationToken);
 
     /// <summary>Platform-wide totals: agencies by plan, users, workspaces and memberships.</summary>
     [HttpGet("overview")]

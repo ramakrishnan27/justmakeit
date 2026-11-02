@@ -1,6 +1,8 @@
 // What the member app says about business models and roles. Plain data and functions, so the wording is
 // tested without a browser. The server decides what a role may do; the checks here only choose what to show.
 
+import { hasPermission, permissionKeys } from './permission-keys.js';
+
 /** The three kinds of organization, in the order the sign-up form offers them. */
 export const businessModels = [
   {
@@ -110,14 +112,16 @@ export function organizationNameLabel(model) {
 }
 
 /**
- * What a role may do, for choosing what to show. This mirrors the server's CanRead, CanWrite and CanManage;
- * the server still checks every request, so a wrong guess here can only hide or show a button.
+ * What a person may do, for choosing what to show, from the permissions their access token carries (the list the
+ * session holds). The three baselines are the ones behind the server's CanRead, CanWrite and CanManage; the Site admin
+ * decides which role holds them. The server still checks every request, so a wrong guess here can only hide or show
+ * a button. A list that is missing allows nothing.
  */
-export function abilities(role) {
+export function abilities(permissions) {
   return {
-    read: Object.hasOwn(roleTitles, role),
-    write: role === 'organizationadmin' || role === 'marketingmanager' || role === 'contentwriter',
-    manage: role === 'organizationadmin',
+    read: hasPermission(permissions, permissionKeys.dataRead),
+    write: hasPermission(permissions, permissionKeys.dataWrite),
+    manage: hasPermission(permissions, permissionKeys.organizationManage),
   };
 }
 

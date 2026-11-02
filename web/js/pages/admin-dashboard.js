@@ -15,35 +15,13 @@ class AdminDashboard extends HTMLElement {
     this.agenciesRegion = h('div', { 'aria-live': 'polite' });
     this.sessionRegion = h('div');
 
-    const { session } = this.context;
-    const { user } = session.state;
-
-    const signOut = h('button', { class: 'button', type: 'button' }, 'Sign out');
-    signOut.addEventListener('click', async () => {
-      signOut.disabled = true;
-      await session.signOut(); // the router then moves the page to the sign-in form
-    });
-
+    // The frame around the page (header, sidebar, sign out) is the app shell.
     this.replaceChildren(
-      h(
-        'header',
-        { class: 'app-header' },
-        h(
-          'div',
-          { class: 'container header-row' },
-          h('p', { class: 'brand' }, 'Platform ', h('span', { class: 'badge badge-accent' }, 'Site admin')),
-          h('div', { class: 'header-actions' }, h('span', { class: 'user-email', title: user?.email ?? '' }, user?.email ?? ''), signOut),
-        ),
-      ),
-      h(
-        'main',
-        { id: 'main', class: 'container page' },
-        h('h1', { tabindex: '-1' }, 'Dashboard'),
-        h('p', { class: 'muted' }, 'A view across every organization on the platform.'),
-        h('section', { 'aria-labelledby': 'overview-title' }, h('h2', { id: 'overview-title' }, 'Overview'), this.overviewRegion),
-        h('section', { 'aria-labelledby': 'agencies-title' }, h('h2', { id: 'agencies-title' }, 'Organizations'), this.agenciesRegion),
-        h('section', { 'aria-labelledby': 'session-title' }, h('h2', { id: 'session-title' }, 'Your session'), this.sessionRegion),
-      ),
+      h('h1', { tabindex: '-1' }, 'Dashboard'),
+      h('p', { class: 'muted' }, 'A view across every organization on the platform.'),
+      h('section', { 'aria-labelledby': 'overview-title' }, h('h2', { id: 'overview-title' }, 'Overview'), this.overviewRegion),
+      h('section', { 'aria-labelledby': 'agencies-title' }, h('h2', { id: 'agencies-title' }, 'Organizations'), this.agenciesRegion),
+      h('section', { 'aria-labelledby': 'session-title' }, h('h2', { id: 'session-title' }, 'Your session'), this.sessionRegion),
     );
 
     this.load();

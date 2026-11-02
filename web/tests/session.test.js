@@ -7,8 +7,15 @@ import { jsonResponse, makeJwt, routedFetch } from './helpers.js';
 const me = { user: { id: 'u1', email: 'root@example.com', fullName: 'Root' }, role: 'siteadmin' };
 const accessToken = makeJwt({ user_id: 'u1', role: 'siteadmin', exp: 1_900_000_000 });
 
+const adminItems = [
+  { id: 'i1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/admin' },
+  { id: 'i2', pageKey: 'menus', label: 'Menus', icon: 'menu', path: '/admin/menus' },
+  { id: 'i3', pageKey: 'permissions', label: 'Permissions', icon: 'shield', path: '/admin/permissions' },
+];
+const adminMenu = { items: adminItems, permissions: [] };
+
 function setup(routes) {
-  const fetchFn = routedFetch(routes);
+  const fetchFn = routedFetch({ 'GET /v1/site/menu': jsonResponse(200, adminMenu), ...routes });
   const api = createApiClient({ fetchFn });
   const session = createSession(api);
   return { fetchFn, api, session };
@@ -28,7 +35,7 @@ describe('session', () => {
 
       await session.signIn('root@example.com', 'a password');
 
-      assert.deepEqual(session.state, { status: 'signedIn', user: me.user, role: 'siteadmin' });
+      assert.deepEqual(session.state, { status: 'signedIn', user: me.user, role: 'siteadmin', menu: adminItems, permissions: [] });
       assert.equal(api.getAccessToken(), accessToken);
       const [login, meCall] = fetchFn.calls;
       assert.equal(login.headers.Authorization, undefined);
@@ -209,8 +216,15 @@ describe('the member session', () => {
   };
   const memberToken = makeJwt({ user_id: 'u2', agency_id: 'a1', role: 'marketingmanager', exp: 1_900_000_000 });
 
+  const memberItems = [
+    { id: 'm1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/dashboard' },
+    { id: 'm2', pageKey: 'workspaces', label: 'Workspaces', icon: 'folder', path: '/workspaces' },
+  ];
+  const memberPermissions = ['dashboard.view', 'workspaces.view', 'data.read', 'data.write'];
+  const memberMenu = { items: memberItems, permissions: memberPermissions };
+
   function memberSetup(routes) {
-    const fetchFn = routedFetch(routes);
+    const fetchFn = routedFetch({ 'GET /v1/menu': jsonResponse(200, memberMenu), ...routes });
     const api = createApiClient({ fetchFn, refreshPath: '/v1/auth/refresh' });
     return { fetchFn, api, session: createSession(api, memberEndpoints) };
   }
@@ -230,8 +244,20 @@ describe('the member session', () => {
     assert.deepEqual(session.state.memberships, memberMe.memberships);
     assert.deepEqual(
       fetchFn.calls.map((call) => call.path),
-      ['/v1/auth/login', '/v1/auth/me'],
+      ['/v1/auth/login', '/v1/auth/me', '/v1/menu'],
     );
+  });
+
+  it('holds the sidebar and the permissions of the token, so a page reads them from memory', async () => {
+    const { session } = memberSetup({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+    });
+
+    await session.signIn('ana@example.com', 'a password');
+
+    assert.deepEqual(session.state.menu, memberItems);
+    assert.deepEqual(session.state.permissions, memberPermissions);
   });
 
   it('never calls the site admin endpoints', async () => {
@@ -339,5 +365,251 @@ describe('the member session', () => {
     const { session } = setup({});
 
     await assert.rejects(session.register({}), /no sign-up/);
+  });
+});
+
+describe('the sidebar and the permissions in the session', () => {
+  const memberMe = {
+    user: { id: 'u2', email: 'ana@example.com', fullName: 'Ana Smith' },
+    agency: { id: 'a1', name: 'Northwind Foods', businessModel: 'company', plan: 'trial' },
+    role: 'marketingmanager',
+    memberships: [],
+  };
+  const memberToken = makeJwt({ user_id: 'u2', agency_id: 'a1', role: 'marketingmanager', exp: 1_900_000_000 });
+  const dashboard = { id: 'm1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/dashboard' };
+  const workspaces = { id: 'm2', pageKey: 'workspaces', label: 'Workspaces', icon: 'folder', path: '/workspaces' };
+  const bothPermissions = ['dashboard.view', 'workspaces.view'];
+
+  /** Lets work that a listener started without waiting for finish. */
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  const countOf = (fetchFn, path) => fetchFn.calls.filter((call) => call.path === path).length;
+
+  function member(routes) {
+    const fetchFn = routedFetch({
+      'POST /v1/auth/login': jsonResponse(200, { accessToken: memberToken }),
+      'POST /v1/auth/refresh': jsonResponse(200, { accessToken: memberToken }),
+      'GET /v1/auth/me': jsonResponse(200, memberMe),
+      'GET /v1/menu': jsonResponse(200, { items: [dashboard, workspaces], permissions: bothPermissions }),
+      ...routes,
+    });
+    const api = createApiClient({ fetchFn, refreshPath: '/v1/auth/refresh' });
+    return { fetchFn, api, session: createSession(api, memberEndpoints) };
+  }
+
+  function admin(routes) {
+    const fetchFn = routedFetch({
+      'POST /v1/site/login': jsonResponse(200, { accessToken }),
+      'GET /v1/site/me': jsonResponse(200, me),
+      ...routes,
+    });
+    const api = createApiClient({ fetchFn });
+    return { fetchFn, api, session: createSession(api) };
+  }
+
+  describe('when it is read', () => {
+    it('reads the menu once at sign-in, and not again as the page moves around', async () => {
+      const { fetchFn, session } = member({});
+
+      await session.signIn('ana@example.com', 'a password');
+      for (let page = 0; page < 5; page += 1) {
+        void session.state.menu;
+        void session.state.permissions;
+        await settle();
+      }
+
+      assert.equal(countOf(fetchFn, '/v1/menu'), 1);
+    });
+
+    it('reads it once when the page restores the session, not twice', async () => {
+      const { fetchFn, session } = member({});
+
+      assert.equal(await session.restore(), true);
+      await settle();
+
+      // The refresh that restores the session also renews the token, but nobody is signed in yet to reload for.
+      assert.equal(countOf(fetchFn, '/v1/menu'), 1);
+      assert.deepEqual(session.state.permissions, bothPermissions);
+    });
+
+    it('reads it again when a request renews the token, because the new token carries the permissions as they are now', async () => {
+      let menuReads = 0;
+      const { fetchFn, api, session } = member({
+        'GET /v1/menu': () =>
+          jsonResponse(200, menuReads++ === 0 ? { items: [dashboard, workspaces], permissions: bothPermissions } : { items: [dashboard], permissions: ['dashboard.view'] }),
+        'POST /v1/auth/refresh': jsonResponse(200, { accessToken: 'renewed-token' }),
+        'GET /v1/data': (call) => (call.headers.Authorization === 'Bearer renewed-token' ? jsonResponse(200, {}) : jsonResponse(401, {})),
+      });
+      await session.signIn('ana@example.com', 'a password');
+      assert.deepEqual(session.state.permissions, bothPermissions);
+
+      await api.request('/v1/data'); // the old token is refused, the session renews it, the request is retried
+      await settle();
+
+      assert.equal(countOf(fetchFn, '/v1/menu'), 2);
+      assert.deepEqual(session.state.permissions, ['dashboard.view']);
+      assert.deepEqual(session.state.menu, [dashboard]);
+      assert.equal(session.state.status, 'signedIn');
+    });
+
+    it('forgets the menu and the permissions on sign-out', async () => {
+      const { session } = member({ 'POST /v1/auth/logout': new Response(null, { status: 204 }) });
+      await session.signIn('ana@example.com', 'a password');
+
+      await session.signOut();
+
+      assert.deepEqual(session.state, { status: 'signedOut', user: null, role: null });
+    });
+  });
+
+  describe('refreshMenu', () => {
+    it('replaces the menu and the permissions, tells subscribers, and leaves the person signed in', async () => {
+      let reads = 0;
+      const { session } = member({
+        'GET /v1/menu': () => jsonResponse(200, reads++ === 0 ? { items: [dashboard], permissions: ['dashboard.view'] } : { items: [dashboard, workspaces], permissions: bothPermissions }),
+      });
+      await session.signIn('ana@example.com', 'a password');
+      const seen = [];
+      session.subscribe((state) => seen.push([state.status, state.menu.length]));
+
+      await session.refreshMenu();
+
+      assert.deepEqual(seen, [['signedIn', 2]]);
+      assert.deepEqual(session.state.permissions, bothPermissions);
+      assert.equal(session.state.user.id, 'u2');
+    });
+
+    it('keeps the menu the person has when it cannot be read again', async () => {
+      let reads = 0;
+      const { session } = member({
+        'GET /v1/menu': () => (reads++ === 0 ? jsonResponse(200, { items: [dashboard], permissions: ['dashboard.view'] }) : jsonResponse(500, {})),
+      });
+      await session.signIn('ana@example.com', 'a password');
+
+      await session.refreshMenu();
+
+      assert.deepEqual(session.state.menu, [dashboard]);
+      assert.equal(session.state.status, 'signedIn');
+    });
+
+    it('asks for nothing when nobody is signed in', async () => {
+      const { fetchFn, session } = member({});
+
+      await session.refreshMenu();
+
+      assert.equal(fetchFn.calls.length, 0);
+    });
+
+    it('lets callers who overlap share one read', async () => {
+      const { fetchFn, session } = member({});
+      await session.signIn('ana@example.com', 'a password');
+
+      await Promise.all([session.refreshMenu(), session.refreshMenu(), session.refreshMenu()]);
+
+      assert.equal(countOf(fetchFn, '/v1/menu'), 2); // the sign-in read and one shared read
+    });
+
+    it('does not bring a session back that ended while it was reading', async () => {
+      let release;
+      const gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      let reads = 0;
+      const { session } = member({
+        'GET /v1/menu': async () => {
+          if (reads++ > 0) {
+            await gate;
+          }
+          return jsonResponse(200, { items: [dashboard], permissions: ['dashboard.view'] });
+        },
+        'POST /v1/auth/logout': new Response(null, { status: 204 }),
+      });
+      await session.signIn('ana@example.com', 'a password');
+
+      const reading = session.refreshMenu();
+      await session.signOut();
+      release();
+      await reading;
+
+      assert.equal(session.state.status, 'signedOut');
+      assert.equal(session.state.menu, undefined);
+    });
+  });
+
+  describe('what the page will draw', () => {
+    it('drops an item with an address that could leave the site or break the page', async () => {
+      const { session } = member({
+        'GET /v1/menu': jsonResponse(200, {
+          items: [
+            dashboard,
+            { id: 'x1', label: 'Elsewhere', icon: 'home', path: 'https://evil.example/' },
+            { id: 'x2', label: 'Same scheme', icon: 'home', path: '//evil.example' },
+            { id: 'x3', label: 'Script', icon: 'home', path: 'javascript:alert(1)' },
+            { id: 'x4', label: '', icon: 'home', path: '/blank' },
+            null,
+            'text',
+            workspaces,
+          ],
+          permissions: ['dashboard.view', 7, null],
+        }),
+      });
+
+      await session.signIn('ana@example.com', 'a password');
+
+      assert.deepEqual(session.state.menu, [dashboard, workspaces]);
+      assert.deepEqual(session.state.permissions, ['dashboard.view']);
+    });
+  });
+
+  describe('when the menu cannot be had', () => {
+    it('stops a member from signing in: without permissions the page cannot tell which pages are theirs', async () => {
+      const { api, session } = member({ 'GET /v1/menu': jsonResponse(500, {}) });
+
+      await assert.rejects(session.signIn('ana@example.com', 'a password'));
+
+      assert.equal(api.getAccessToken(), null);
+      assert.notEqual(session.state.status, 'signedIn');
+    });
+
+    it('leaves a member signed out when restoring the page cannot read the menu', async () => {
+      const { api, session } = member({ 'GET /v1/menu': jsonResponse(500, {}) });
+
+      assert.equal(await session.restore(), false);
+
+      assert.equal(session.state.status, 'signedOut');
+      assert.equal(api.getAccessToken(), null);
+    });
+
+    it('gives a site admin the pages that repair a menu, and signs them in all the same', async () => {
+      const { session } = admin({ 'GET /v1/site/menu': jsonResponse(500, {}) });
+
+      await session.signIn('root@example.com', 'a password');
+
+      assert.equal(session.state.status, 'signedIn');
+      assert.deepEqual(
+        session.state.menu.map((item) => item.path),
+        ['/admin', '/admin/menus', '/admin/permissions'],
+      );
+      assert.deepEqual(session.state.permissions, []);
+    });
+
+    it('does the same for a site admin whose menu came back empty', async () => {
+      const { session } = admin({ 'GET /v1/site/menu': jsonResponse(200, { items: [], permissions: [] }) });
+
+      await session.signIn('root@example.com', 'a password');
+
+      assert.equal(session.state.menu.length, 3);
+    });
+
+    it('keeps the fallback list from being changed by anyone who holds the session', async () => {
+      const { session } = admin({ 'GET /v1/site/menu': jsonResponse(500, {}) });
+      await session.signIn('root@example.com', 'a password');
+
+      session.state.menu.push({ id: 'x', label: 'Extra', icon: 'home', path: '/extra' });
+
+      const again = admin({ 'GET /v1/site/menu': jsonResponse(500, {}) });
+      await again.session.signIn('root@example.com', 'a password');
+      assert.equal(again.session.state.menu.length, 3);
+    });
   });
 });

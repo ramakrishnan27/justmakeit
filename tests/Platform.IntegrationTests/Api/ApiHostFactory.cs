@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Platform.Auth.Interfaces;
 using Platform.Helpers.Constants;
 using Platform.Helpers.Utilities;
 
@@ -34,9 +36,32 @@ public sealed class ApiHostFactory(
         ["Cors:WebOrigin"] = ""
     };
 
-    /// <summary>An access token for the given user, agency and role, signed with this host's key.</summary>
-    public string CreateAccessToken(Guid userId, Guid agencyId, OrganizationRole role) =>
-        TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role);
+    /// <summary>The key this host validates tokens with, for tests that mint a token of their own shape.</summary>
+    public string SigningKey => settings["Jwt:SigningKey"]!;
+
+    /// <summary>True when this host was given the address that refuses connections, so it can only decide from the token.</summary>
+    private bool HasNoDatabase => settings.GetValueOrDefault("ConnectionStrings:App") == UnreachableConnectionString;
+
+    /// <summary>
+    /// An access token for the given user, agency and role, signed with this host's key. It carries the
+    /// permissions the role holds in a fresh installation (or <paramref name="permissions"/>) and the
+    /// permission version the host holds right now, so the API accepts it.
+    /// </summary>
+    public string CreateAccessToken(Guid userId, Guid agencyId, OrganizationRole role, IEnumerable<string>? permissions = null) =>
+        TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role, permissions, CurrentPermissionVersion());
+
+    /// <summary>The same token with an explicit permission version, for a test that wants an out-of-date one.</summary>
+    public string CreateAccessTokenWithVersion(Guid userId, Guid agencyId, OrganizationRole role, long permissionVersion) =>
+        TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role, null, permissionVersion);
+
+    /// <summary>A member token with no permissions and no version, as issued before permissions travelled in the token.</summary>
+    public string CreateAccessTokenWithoutPermissions(Guid userId, Guid agencyId, OrganizationRole role) =>
+        TestAccessTokens.CreateWithoutPermissions(settings["Jwt:SigningKey"]!, userId, agencyId, role);
+
+    /// <summary>The permission version this host's API holds right now (read from the database, or the stub's 1).</summary>
+    public long CurrentPermissionVersion() =>
+        // On the thread pool, so blocking here cannot wait on the test framework's own synchronization context.
+        Task.Run(() => Services.GetRequiredService<IPermissionService>().GetVersionAsync(CancellationToken.None)).GetAwaiter().GetResult();
 
     /// <summary>A site admin token (user and role, no agency) signed with this host's key.</summary>
     public string CreateSiteAdminAccessToken(Guid userId) =>
@@ -52,6 +77,17 @@ public sealed class ApiHostFactory(
         builder.ConfigureTestServices(services =>
         {
             services.AddDataProtection().UseEphemeralDataProtectionProvider();
+
+            // With no database to read the permission version from, the API would answer every member
+            // token 500. The stub holds the default grants and a version that never moves.
+            if (HasNoDatabase)
+            {
+                services.RemoveAll<IPermissionService>();
+                services.AddSingleton<IPermissionService, DefaultGrantsPermissionService>();
+                services.RemoveAll<IMenuCache>();
+                services.AddSingleton<IMenuCache, DefaultMenuCache>();
+            }
+
             configureServices?.Invoke(services);
         });
     }

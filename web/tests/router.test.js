@@ -42,6 +42,31 @@ describe('matchRoute', () => {
   });
 });
 
+describe('the site admin app', () => {
+  it('has a dashboard, the menu editor and the permission editor behind sign-in', () => {
+    assert.deepEqual(
+      routes.filter((route) => route.requiresAuth).map((route) => [route.name, route.path, route.element]),
+      [
+        ['dashboard', '/admin', 'admin-dashboard'],
+        ['menus', '/admin/menus', 'admin-menus'],
+        ['permissions', '/admin/permissions', 'admin-permissions'],
+      ],
+    );
+  });
+
+  it("asks for no permission on any page: a site admin's rights are the role itself", () => {
+    assert.ok(routes.every((route) => route.permission === undefined));
+    for (const path of ['/admin', '/admin/menus', '/admin/permissions']) {
+      assert.equal(resolveNavigation({ pathname: path, status: 'signedIn', permissions: [] }).type, 'render', path);
+    }
+  });
+
+  it('turns a visitor away from the editors, to sign in', () => {
+    assert.deepEqual(resolveNavigation({ pathname: '/admin/menus', status: 'signedOut' }), { type: 'redirect', to: loginPath });
+    assert.deepEqual(resolveNavigation({ pathname: '/admin/permissions', status: 'unknown' }), { type: 'redirect', to: loginPath });
+  });
+});
+
 describe('resolveNavigation', () => {
   const decide = (pathname, status) => resolveNavigation({ pathname, status });
 
@@ -103,13 +128,14 @@ function fakeWindow(pathname) {
   return win;
 }
 
-function fakeSession(status) {
+function fakeSession(status, permissions) {
   const listeners = [];
   return {
-    state: { status },
+    state: { status, permissions },
     subscribe: (listener) => listeners.push(listener),
-    set(next) {
-      this.state = { status: next };
+    /** Changes the status, and the permissions too when they are given. */
+    set(next, nextPermissions = this.state.permissions) {
+      this.state = { status: next, permissions: nextPermissions };
       listeners.forEach((listener) => listener(this.state));
     },
   };
@@ -213,12 +239,13 @@ describe('createRouter', () => {
 });
 
 describe('the member app', () => {
-  const decide = (pathname, status) => resolveNavigation({ pathname, status, app: memberApp });
+  const everything = ['dashboard.view', 'workspaces.view'];
+  const decide = (pathname, status, permissions = everything) => resolveNavigation({ pathname, status, app: memberApp, permissions });
 
-  it('has a dashboard behind sign-in, and a sign-in and a sign-up page for visitors', () => {
+  it('has a dashboard and a workspaces page behind sign-in, and a sign-in and a sign-up page for visitors', () => {
     assert.deepEqual(
       memberApp.routes.filter((route) => route.requiresAuth).map((route) => route.name),
-      ['dashboard'],
+      ['dashboard', 'workspaces'],
     );
     assert.deepEqual(
       memberApp.routes.filter((route) => !route.requiresAuth).map((route) => route.name),
@@ -226,8 +253,19 @@ describe('the member app', () => {
     );
     assert.deepEqual(
       memberApp.routes.map((route) => route.path),
-      ['/dashboard', '/login', '/register'],
+      ['/dashboard', '/workspaces', '/login', '/register'],
     );
+  });
+
+  it('names the permission each page behind sign-in needs, and none for the pages before it', () => {
+    assert.deepEqual(
+      memberApp.routes.filter((route) => route.permission).map((route) => [route.name, route.permission]),
+      [
+        ['dashboard', 'dashboard.view'],
+        ['workspaces', 'workspaces.view'],
+      ],
+    );
+    assert.ok(memberApp.routes.filter((route) => !route.requiresAuth).every((route) => route.permission === undefined));
   });
 
   it('sends the root to the dashboard, which sends a visitor on to sign in', () => {
@@ -264,6 +302,50 @@ describe('the member app', () => {
     assert.deepEqual(decide('/dashboard/settings', 'signedIn'), { type: 'notFound' });
   });
 
+  it('shows the workspaces page to someone whose token carries workspaces.view', () => {
+    const decision = decide('/workspaces', 'signedIn');
+    assert.equal(decision.type, 'render');
+    assert.equal(decision.route.element, 'member-workspaces');
+  });
+
+  it('turns away someone who lacks the permission of a page, and says which page it was', () => {
+    const decision = decide('/workspaces', 'signedIn', ['dashboard.view']);
+
+    assert.equal(decision.type, 'forbidden');
+    assert.equal(decision.route.name, 'workspaces');
+  });
+
+  it('still shows the pages whose permission they do hold', () => {
+    assert.equal(decide('/dashboard', 'signedIn', ['dashboard.view']).type, 'render');
+  });
+
+  it('fails closed: a permission list that is missing, empty or not a list opens no page that needs one', () => {
+    // Straight to resolveNavigation: the helper above would turn a missing list into a full one.
+    for (const permissions of [null, undefined, [], 'dashboard.view', {}, 0]) {
+      for (const pathname of ['/dashboard', '/workspaces']) {
+        const decision = resolveNavigation({ pathname, status: 'signedIn', app: memberApp, permissions });
+        assert.equal(decision.type, 'forbidden', `${pathname} with ${String(permissions)}`);
+      }
+    }
+    assert.equal(resolveNavigation({ pathname: '/dashboard', status: 'signedIn', app: memberApp }).type, 'forbidden');
+  });
+
+  it('matches a permission exactly, not by prefix or case', () => {
+    for (const permission of ['Workspaces.View', 'workspaces', 'workspaces.view ', 'workspaces.*', '*']) {
+      assert.equal(decide('/workspaces', 'signedIn', [permission]).type, 'forbidden', permission);
+    }
+  });
+
+  it('asks a visitor to sign in before it talks about permissions', () => {
+    assert.deepEqual(decide('/workspaces', 'signedOut', []), { type: 'redirect', to: '/login' });
+    assert.deepEqual(decide('/workspaces', 'unknown', null), { type: 'redirect', to: '/login' });
+  });
+
+  it('does not need a permission to show the sign-in and sign-up pages', () => {
+    assert.equal(decide('/login', 'signedOut', null).type, 'render');
+    assert.equal(decide('/register', 'signedOut', null).type, 'render');
+  });
+
   it('works with a trailing slash', () => {
     assert.equal(decide('/register/', 'signedOut').type, 'render');
   });
@@ -284,9 +366,9 @@ describe('appForPath', () => {
 });
 
 describe('createRouter for the member app', () => {
-  function start(pathname, status) {
+  function start(pathname, status, permissions = ['dashboard.view', 'workspaces.view']) {
     const win = fakeWindow(pathname);
-    const session = fakeSession(status);
+    const session = fakeSession(status, permissions);
     const rendered = [];
     const router = createRouter({ win, session, render: (decision) => rendered.push(decision), app: memberApp });
     router.start();
@@ -324,5 +406,72 @@ describe('createRouter for the member app', () => {
 
     assert.equal(rendered.length, 1);
     assert.equal(win.location.pathname, '/login');
+  });
+
+  it('shows "no access" for a page the permissions do not allow, and keeps the address', () => {
+    const { win, rendered } = start('/workspaces', 'signedIn', ['dashboard.view']);
+
+    assert.equal(rendered.at(-1).type, 'forbidden');
+    assert.equal(win.location.pathname, '/workspaces');
+  });
+
+  it('turns the open page into "no access" when a renewed token no longer carries its permission', () => {
+    const { session, rendered } = start('/workspaces', 'signedIn');
+    assert.equal(rendered.at(-1).type, 'render');
+
+    session.set('signedIn', ['dashboard.view']);
+
+    assert.equal(rendered.at(-1).type, 'forbidden');
+    assert.equal(rendered.length, 2);
+  });
+
+  it('opens the page again when a renewed token brings the permission back', () => {
+    const { session, rendered } = start('/workspaces', 'signedIn', ['dashboard.view']);
+    assert.equal(rendered.at(-1).type, 'forbidden');
+
+    session.set('signedIn', ['dashboard.view', 'workspaces.view']);
+
+    assert.equal(rendered.at(-1).type, 'render');
+    assert.equal(rendered.at(-1).route.name, 'workspaces');
+  });
+
+  it('leaves the page alone when the permissions change but not what this address shows', () => {
+    const { session, rendered } = start('/dashboard', 'signedIn', ['dashboard.view', 'workspaces.view']);
+
+    // A permission the open page does not need is taken away: nothing the person is doing is thrown away.
+    session.set('signedIn', ['dashboard.view']);
+    session.set('signedIn', ['dashboard.view', 'data.read']);
+
+    assert.equal(rendered.length, 1);
+  });
+
+  it('does not render again for the same permissions in another order', () => {
+    const { session, rendered } = start('/dashboard', 'signedIn', ['dashboard.view', 'workspaces.view']);
+
+    session.set('signedIn', ['workspaces.view', 'dashboard.view']);
+
+    assert.equal(rendered.length, 1);
+  });
+
+  it('checks the permissions again on Back and Forward', () => {
+    const { win, rendered } = start('/dashboard', 'signedIn', ['dashboard.view']);
+    win.location.pathname = '/workspaces';
+
+    win.fire('popstate');
+
+    assert.equal(rendered.at(-1).type, 'forbidden');
+  });
+
+  it('checks them when the person follows a link too', () => {
+    const win = fakeWindow('/dashboard');
+    const session = fakeSession('signedIn', ['dashboard.view']);
+    const rendered = [];
+    const router = createRouter({ win, session, render: (decision) => rendered.push(decision), app: memberApp });
+    router.start();
+
+    router.navigate('/workspaces');
+
+    assert.equal(rendered.at(-1).type, 'forbidden');
+    assert.equal(win.history.entries.at(-1), '/workspaces');
   });
 });

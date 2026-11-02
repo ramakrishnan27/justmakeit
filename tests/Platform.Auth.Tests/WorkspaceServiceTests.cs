@@ -37,7 +37,7 @@ public sealed class WorkspaceServiceTests
     [Fact]
     public async Task List_AsksOnlyForTheAgencyInTheTenantContext()
     {
-        _tenant.Set(_agencyId, _userId, "clientmanager");
+        _tenant.Set(_agencyId, _userId, "clientmanager", [PermissionKeys.WorkspacesView]);
         _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
         [
             new WorkspaceRecord { Id = Guid.NewGuid(), AgencyId = _agencyId, Name = "One", CreatedAt = _time.Now },
@@ -66,7 +66,7 @@ public sealed class WorkspaceServiceTests
     public async Task Create_AsAnOrganizationAdmin_StoresTheWorkspaceInTheCallersOrganization(BusinessModel model)
     {
         GivenBusinessModel(model);
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
         WorkspaceRecord? stored = null;
         await _workspaces.InsertAsync(Arg.Do<WorkspaceRecord>(w => stored = w), _userId, Arg.Any<CancellationToken>());
 
@@ -81,25 +81,55 @@ public sealed class WorkspaceServiceTests
     }
 
     [Theory]
+    [InlineData("organizationadmin")] // the role that holds the permission by default, here without it
     [InlineData("marketingmanager")]
     [InlineData("contentwriter")]
     [InlineData("clientmanager")]
-    [InlineData("OrganizationAdmin")]
-    [InlineData("owner")]
-    [InlineData("admin")]
-    [InlineData("0")]
-    [InlineData("superuser")]
-    [InlineData("")]
     [InlineData(null)]
-    public async Task Create_WithoutTheOrganizationAdminRole_IsForbidden_AndStoresNothing(string? role)
+    public async Task Create_WithoutTheCreatePermission_IsForbidden_WhateverTheRole_AndStoresNothing(string? role)
     {
-        _tenant.Set(_agencyId, _userId, role);
+        // Everything else the catalog has, including the baseline that used to stand for "manage".
+        var others = PermissionKeys.All.Where(key => key != PermissionKeys.WorkspacesCreate);
+        _tenant.Set(_agencyId, _userId, role, others);
 
         var exception = await Assert.ThrowsAsync<ForbiddenException>(
             () => _service.CreateAsync(new CreateWorkspaceRequest("Client one"), CancellationToken.None));
 
-        Assert.Equal("insufficient_role", exception.Code);
+        Assert.Equal("insufficient_permission", exception.Code);
         await _workspaces.DidNotReceiveWithAnyArgs().InsertAsync(default!, default, default);
+    }
+
+    [Fact]
+    public async Task Create_WithNoPermissionsAtAll_IsForbidden()
+    {
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+
+        var exception = await Assert.ThrowsAsync<ForbiddenException>(
+            () => _service.CreateAsync(new CreateWorkspaceRequest("Client one"), CancellationToken.None));
+
+        Assert.Equal("insufficient_permission", exception.Code);
+    }
+
+    [Fact]
+    public async Task Create_ForARoleTheSiteAdminGaveThePermission_IsAllowed()
+    {
+        // The permission, not the role, decides: a marketing manager can create workspaces once granted it.
+        _tenant.Set(_agencyId, _userId, "marketingmanager", [PermissionKeys.WorkspacesCreate]);
+
+        await _service.CreateAsync(new CreateWorkspaceRequest("Client one"), CancellationToken.None);
+
+        await _workspaces.Received(1).InsertAsync(Arg.Any<WorkspaceRecord>(), _userId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task List_WithoutTheViewPermission_IsForbidden_AndReadsNothing()
+    {
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate, PermissionKeys.DataRead]);
+
+        var exception = await Assert.ThrowsAsync<ForbiddenException>(() => _service.ListAsync(CancellationToken.None));
+
+        Assert.Equal("insufficient_permission", exception.Code);
+        await _workspaces.DidNotReceiveWithAnyArgs().ListAsync(default, default, default);
     }
 
     [Fact]
@@ -107,7 +137,7 @@ public sealed class WorkspaceServiceTests
     {
         // No role reaches this for a creator today (they are content writers); the model rule stands on its own.
         GivenBusinessModel(BusinessModel.Creator);
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
         _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
             [new WorkspaceRecord { Id = Guid.NewGuid(), AgencyId = _agencyId, Name = "Main workspace", CreatedAt = _time.Now }]);
 
@@ -122,7 +152,7 @@ public sealed class WorkspaceServiceTests
     public async Task Create_ForAnIndividualCreatorWithoutAWorkspaceYet_IsAllowed()
     {
         GivenBusinessModel(BusinessModel.Creator);
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
         _workspaces.ListAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns([]);
 
         await _service.CreateAsync(new CreateWorkspaceRequest("Main workspace"), CancellationToken.None);
@@ -136,7 +166,7 @@ public sealed class WorkspaceServiceTests
     public async Task Create_ForACompanyOrAnAgency_DoesNotLookAtHowManyWorkspacesThereAre(BusinessModel model)
     {
         GivenBusinessModel(model);
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
 
         await _service.CreateAsync(new CreateWorkspaceRequest("Another client"), CancellationToken.None);
 
@@ -146,7 +176,7 @@ public sealed class WorkspaceServiceTests
     [Fact]
     public async Task Create_WhenTheOrganizationCannotBeSeen_IsUnauthorized_AndStoresNothing()
     {
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
         _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns((AgencyRecord?)null);
 
         var exception = await Assert.ThrowsAsync<UnauthorizedException>(
@@ -162,7 +192,7 @@ public sealed class WorkspaceServiceTests
     [InlineData("   ")]
     public async Task Create_WithoutAName_IsABadRequest_AndStoresNothing(string? name)
     {
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
 
         var exception = await Assert.ThrowsAsync<BadRequestException>(
             () => _service.CreateAsync(new CreateWorkspaceRequest(name), CancellationToken.None));
@@ -174,7 +204,7 @@ public sealed class WorkspaceServiceTests
     [Fact]
     public async Task Create_WithATooLongName_IsABadRequest()
     {
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _tenant.Set(_agencyId, _userId, "organizationadmin", [PermissionKeys.WorkspacesCreate]);
 
         await Assert.ThrowsAsync<BadRequestException>(
             () => _service.CreateAsync(new CreateWorkspaceRequest(new string('n', 201)), CancellationToken.None));

@@ -13,19 +13,20 @@ namespace Platform.Auth.Controllers;
 [Produces("application/json")]
 public sealed class WorkspacesController(IWorkspaceService workspaces) : ControllerBase
 {
-    /// <summary>Lists the workspaces of the current organization. Any member may read them.</summary>
+    /// <summary>Lists the workspaces of the current organization. Needs the workspaces.view permission, which every role holds by default.</summary>
     [HttpGet]
-    [Authorize(Policy = PolicyNames.CanRead)]
+    [Authorize(Policy = PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesView)]
     [ProducesResponseType<IReadOnlyList<WorkspaceResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<WorkspaceResponse>>> List(CancellationToken cancellationToken) =>
         Ok(await workspaces.ListAsync(cancellationToken));
 
     /// <summary>
-    /// Creates a workspace in the current organization. Organization admins only, and never in an
-    /// individual creator's organization, which has the one workspace made at sign-up.
+    /// Creates a workspace in the current organization. Needs the workspaces.create permission, which only
+    /// organization admins hold by default, and never in an individual creator's organization, which has the
+    /// one workspace made at sign-up.
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = PolicyNames.CanManage)]
+    [Authorize(Policy = PolicyNames.PermissionPrefix + PermissionKeys.WorkspacesCreate)]
     [ProducesResponseType<WorkspaceResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create(CreateWorkspaceRequest request, CancellationToken cancellationToken)
     {

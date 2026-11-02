@@ -118,17 +118,34 @@ describe('upcomingAreas', () => {
 });
 
 describe('abilities', () => {
-  it('mirrors what the server allows each role to do', () => {
-    assert.deepEqual(abilities('organizationadmin'), { read: true, write: true, manage: true });
-    assert.deepEqual(abilities('clientmanager'), { read: true, write: false, manage: false });
-    assert.deepEqual(abilities('marketingmanager'), { read: true, write: true, manage: false });
-    assert.deepEqual(abilities('contentwriter'), { read: true, write: true, manage: false });
+  // The permissions each role holds in a fresh installation, as the server seeds them.
+  const defaults = {
+    organizationadmin: ['dashboard.view', 'workspaces.view', 'workspaces.create', 'data.read', 'data.write', 'organization.manage'],
+    clientmanager: ['dashboard.view', 'workspaces.view', 'data.read'],
+    marketingmanager: ['dashboard.view', 'workspaces.view', 'data.read', 'data.write'],
+    contentwriter: ['dashboard.view', 'workspaces.view', 'data.read', 'data.write'],
+  };
+
+  it('reads what the token carries: the three baselines behind CanRead, CanWrite and CanManage', () => {
+    assert.deepEqual(abilities(defaults.organizationadmin), { read: true, write: true, manage: true });
+    assert.deepEqual(abilities(defaults.clientmanager), { read: true, write: false, manage: false });
+    assert.deepEqual(abilities(defaults.marketingmanager), { read: true, write: true, manage: false });
+    assert.deepEqual(abilities(defaults.contentwriter), { read: true, write: true, manage: false });
   });
 
-  it('allows nothing to a role it does not know', () => {
-    for (const role of ['owner', 'viewer', 'siteadmin', 'constructor', '', undefined, null]) {
-      assert.deepEqual(abilities(role), { read: false, write: false, manage: false }, String(role));
+  it('follows the Site admin: a role that was given a permission can, one that lost it cannot', () => {
+    assert.equal(abilities([...defaults.contentwriter, 'organization.manage']).manage, true);
+    assert.equal(abilities(defaults.organizationadmin.filter((key) => key !== 'data.write')).write, false);
+  });
+
+  it('allows nothing when the list is missing or is not a list', () => {
+    for (const permissions of [undefined, null, [], 'data.read', {}, 7]) {
+      assert.deepEqual(abilities(permissions), { read: false, write: false, manage: false }, String(permissions));
     }
+  });
+
+  it('matches a permission exactly', () => {
+    assert.deepEqual(abilities(['Data.Read', 'data.read ', 'data', 'data.*']), { read: false, write: false, manage: false });
   });
 });
 

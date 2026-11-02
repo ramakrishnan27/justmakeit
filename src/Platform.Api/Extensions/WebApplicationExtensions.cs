@@ -9,8 +9,12 @@ namespace Platform.Api.Extensions;
 
 public static class WebApplicationExtensions
 {
-    /// <summary>The addresses of the member app (sign in, create an account, dashboard). The site admin app lives under /admin.</summary>
-    private static readonly string[] MemberAppPages = ["login", "register", "dashboard"];
+    /// <summary>
+    /// The addresses of the member app (sign in, create an account, dashboard, workspaces). The site admin app lives
+    /// under /admin. A page that a menu item links to needs its address here, or reloading it would answer 404; a test
+    /// checks that every address in <c>menu_pages</c> serves the app shell.
+    /// </summary>
+    private static readonly string[] MemberAppPages = ["login", "register", "dashboard", "workspaces"];
 
     /// <summary>
     /// Runs before the first request: stops the app on invalid configuration, then applies migrations
@@ -39,7 +43,7 @@ public static class WebApplicationExtensions
     /// <summary>
     /// Lets a browser open or reload a client-side route such as /admin/login or /login: those paths answer
     /// with the app shell (<c>index.html</c>) instead of 404. Only the app addresses are covered (/admin and
-    /// the member app: /login, /register, /dashboard), so a mistyped /v1 route still gets a real 404 from the API.
+    /// the member app: /login, /register, /dashboard, /workspaces), so a mistyped /v1 route still gets a real 404 from the API.
     /// </summary>
     public static IEndpointRouteBuilder MapPlatformWebFallback(this WebApplication app)
     {

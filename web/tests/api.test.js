@@ -5,6 +5,93 @@ import { fakeFetch, jsonResponse, routedFetch } from './helpers.js';
 
 const authorizationOf = (call) => call.headers.Authorization;
 
+describe('api client: renewed tokens', () => {
+  it('tells listeners when a refresh gives it a new token, whoever asked for it', async () => {
+    const fetchFn = routedFetch({
+      'GET /v1/data': (call) => (authorizationOf(call) === 'Bearer new-token' ? jsonResponse(200, {}) : jsonResponse(401, {})),
+      // A new response each time: a body can be read once.
+      'POST /v1/site/refresh': () => jsonResponse(200, { accessToken: 'new-token' }),
+    });
+    const api = createApiClient({ fetchFn });
+    api.setAccessToken('old-token');
+    let announced = 0;
+    api.onTokenRefreshed(() => {
+      announced += 1;
+      assert.equal(api.getAccessToken(), 'new-token'); // the new token is already held when they hear of it
+    });
+
+    await api.request('/v1/data'); // renewed because a request was refused
+    await api.refresh(); // renewed because the page asked, as it does when it restores a session
+
+    assert.equal(announced, 2);
+  });
+
+  it('says nothing when the refresh fails', async () => {
+    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(401, {}) }) });
+    let announced = 0;
+    api.onTokenRefreshed(() => {
+      announced += 1;
+    });
+
+    assert.equal(await api.refresh(), false);
+
+    assert.equal(announced, 0);
+  });
+
+  it('says nothing when the answer holds no token', async () => {
+    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, {}) }) });
+    let announced = 0;
+    api.onTokenRefreshed(() => {
+      announced += 1;
+    });
+
+    assert.equal(await api.refresh(), false);
+
+    assert.equal(announced, 0);
+  });
+
+  it('announces once for callers that share one refresh', async () => {
+    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
+    let announced = 0;
+    api.onTokenRefreshed(() => {
+      announced += 1;
+    });
+
+    await Promise.all([api.refresh(), api.refresh(), api.refresh()]);
+
+    assert.equal(announced, 1);
+  });
+
+  it('keeps the new token when a listener throws, and lets the other listeners hear', async () => {
+    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
+    let heard = false;
+    api.onTokenRefreshed(() => {
+      throw new Error('a listener with a bug');
+    });
+    api.onTokenRefreshed(() => {
+      heard = true;
+    });
+
+    assert.equal(await api.refresh(), true);
+
+    assert.equal(api.getAccessToken(), 't');
+    assert.equal(heard, true);
+  });
+
+  it('lets a listener stop listening', async () => {
+    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
+    let announced = 0;
+    const stop = api.onTokenRefreshed(() => {
+      announced += 1;
+    });
+    stop();
+
+    await api.refresh();
+
+    assert.equal(announced, 0);
+  });
+});
+
 describe('api client', () => {
   it('adds the access token as a bearer header, and sends JSON bodies as JSON', async () => {
     const fetchFn = fakeFetch([jsonResponse(200, { ok: true })]);

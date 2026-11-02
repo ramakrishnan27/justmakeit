@@ -5,8 +5,11 @@ using Platform.Infrastructure.Data;
 namespace Platform.Auth.Services;
 
 /// <summary>
-/// What each role may do, in one place. The authorization policies are built from it and services
-/// re-check against it, so the two can never disagree.
+/// What each role may do in a fresh installation: the factory defaults. <c>005_menus_permissions.sql</c>
+/// seeds exactly these as the grants of each business model and role, and a test compares the two. At run
+/// time the Site admin's settings in the database decide (they reach the API as permissions in the access
+/// token), so this class is the reference the seeds and the tests are checked against, not the rule that
+/// is applied. <see cref="TryParse"/> is still how a role claim is read.
 /// </summary>
 public static class RolePermissions
 {
@@ -22,6 +25,21 @@ public static class RolePermissions
 
     /// <summary>Only organization admins manage the organization: its members and its workspaces.</summary>
     public static bool CanManage(this OrganizationRole role) => role is OrganizationRole.OrganizationAdmin;
+
+    /// <summary>
+    /// Whether <paramref name="role"/> holds <paramref name="permissionKey"/> in a fresh installation.
+    /// <c>005_menus_permissions.sql</c> seeds exactly this, and a test compares the two. At run time the
+    /// Site admin's settings in the database decide, not this method; it is the factory default and
+    /// the oracle for the tests. A key that is not in <see cref="PermissionKeys.All"/> throws, so a new
+    /// permission cannot be added without saying who gets it.
+    /// </summary>
+    public static bool GrantedByDefault(this OrganizationRole role, string permissionKey) => permissionKey switch
+    {
+        PermissionKeys.DashboardView or PermissionKeys.WorkspacesView or PermissionKeys.DataRead => role.CanRead(),
+        PermissionKeys.DataWrite => role.CanWrite(),
+        PermissionKeys.WorkspacesCreate or PermissionKeys.OrganizationManage => role.CanManage(),
+        _ => throw new ArgumentOutOfRangeException(nameof(permissionKey), permissionKey, "Unknown permission.")
+    };
 
     /// <summary>
     /// Reads a role from its stored lower-case name, such as the token's role claim. Strict on purpose:
@@ -41,8 +59,4 @@ public static class RolePermissions
         role = default;
         return false;
     }
-
-    /// <summary>The stored names of every role that passes <paramref name="allowed"/>.</summary>
-    public static string[] NamesWhere(Func<OrganizationRole, bool> allowed) =>
-        Enum.GetValues<OrganizationRole>().Where(allowed).Select(role => role.ToDb()).ToArray();
 }

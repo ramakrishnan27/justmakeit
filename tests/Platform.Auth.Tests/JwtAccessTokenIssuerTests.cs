@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Platform.Auth.Models;
 using Platform.Auth.Services;
 using Platform.Auth.Settings;
 using Platform.Auth.Tests.Support;
@@ -15,6 +16,8 @@ public sealed class JwtAccessTokenIssuerTests
     private readonly Guid _userId = Guid.NewGuid();
     private readonly Guid _agencyId = Guid.NewGuid();
 
+    private static readonly PermissionGrants Grants = new(7, [PermissionKeys.DashboardView, PermissionKeys.WorkspacesView]);
+
     private JwtAccessTokenIssuer CreateIssuer() => new(Options.Create(_settings), _time);
 
     // The very rules every protected endpoint applies, so what is issued is what the API accepts.
@@ -28,7 +31,7 @@ public sealed class JwtAccessTokenIssuerTests
     [Fact]
     public async Task Issue_ProducesATokenTheApiAccepts()
     {
-        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.MarketingManager);
+        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.MarketingManager, Grants);
 
         var result = await ValidateAsync(token.Value);
 
@@ -38,7 +41,7 @@ public sealed class JwtAccessTokenIssuerTests
     [Fact]
     public void Issue_CarriesTheUserAgencyAndRoleClaims()
     {
-        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.ClientManager).Value);
+        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.ClientManager, Grants).Value);
 
         Assert.Equal(_userId.ToString(), token.GetClaim(ClaimNames.UserId).Value);
         Assert.Equal(_agencyId.ToString(), token.GetClaim(ClaimNames.AgencyId).Value);
@@ -52,7 +55,7 @@ public sealed class JwtAccessTokenIssuerTests
     [InlineData(OrganizationRole.ContentWriter, "contentwriter")]
     public void Issue_WritesTheRoleAsItsLowerCaseName(OrganizationRole role, string expected)
     {
-        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, role).Value);
+        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, role, Grants).Value);
 
         Assert.Equal(expected, token.GetClaim(ClaimNames.Role).Value);
     }
@@ -60,13 +63,13 @@ public sealed class JwtAccessTokenIssuerTests
     [Fact]
     public void Issue_SignsWithHs256()
     {
-        Assert.Equal("HS256", new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).Value).Alg);
+        Assert.Equal("HS256", new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value).Alg);
     }
 
     [Fact]
     public void Issue_ExpiresAfterTheConfiguredMinutes_FifteenByDefault()
     {
-        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin);
+        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants);
 
         Assert.Equal(15, new JwtSettings().AccessTokenMinutes);
         Assert.Equal(_time.Now.AddMinutes(15), token.ExpiresAt);
@@ -80,7 +83,7 @@ public sealed class JwtAccessTokenIssuerTests
     {
         _settings.AccessTokenMinutes = 5;
 
-        Assert.Equal(_time.Now.AddMinutes(5), CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).ExpiresAt);
+        Assert.Equal(_time.Now.AddMinutes(5), CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).ExpiresAt);
     }
 
     [Fact]
@@ -89,7 +92,7 @@ public sealed class JwtAccessTokenIssuerTests
         _settings.Issuer = "my-issuer";
         _settings.Audience = "my-audience";
 
-        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).Value);
+        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value);
 
         Assert.Equal("my-issuer", token.Issuer);
         Assert.Contains("my-audience", token.Audiences);
@@ -100,13 +103,62 @@ public sealed class JwtAccessTokenIssuerTests
     {
         var issuer = CreateIssuer();
 
-        var first = new JsonWebToken(issuer.Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).Value);
-        var second = new JsonWebToken(issuer.Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).Value);
+        var first = new JsonWebToken(issuer.Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value);
+        var second = new JsonWebToken(issuer.Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value);
 
         Assert.NotEqual(first.Id, second.Id);
     }
 
+    // --- Permissions -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Issue_CarriesOneClaimPerPermissionAndThePermissionVersion()
+    {
+        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.MarketingManager, Grants);
+
+        var result = await ValidateAsync(token.Value);
+
+        Assert.True(result.IsValid, result.Exception?.Message);
+        // What the API sees after validation: a claim per key, and the version as a number.
+        Assert.Equal(
+            [PermissionKeys.DashboardView, PermissionKeys.WorkspacesView],
+            result.ClaimsIdentity.FindAll(ClaimNames.Permission).Select(c => c.Value).Order());
+        Assert.Equal("7", result.ClaimsIdentity.FindFirst(ClaimNames.PermissionVersion)!.Value);
+    }
+
+    [Fact]
+    public async Task Issue_WithNoPermissions_CarriesNoPermissionClaim_ButStillTheVersion()
+    {
+        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.ClientManager, new PermissionGrants(12, []));
+
+        var result = await ValidateAsync(token.Value);
+
+        Assert.True(result.IsValid, result.Exception?.Message);
+        Assert.Empty(result.ClaimsIdentity.FindAll(ClaimNames.Permission));
+        Assert.Equal("12", result.ClaimsIdentity.FindFirst(ClaimNames.PermissionVersion)!.Value);
+    }
+
+    [Fact]
+    public void Issue_WritesThePermissionsAsAJsonArray_AndTheVersionAsANumber()
+    {
+        var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value);
+
+        Assert.Equal(
+            [PermissionKeys.DashboardView, PermissionKeys.WorkspacesView],
+            token.GetPayloadValue<string[]>(ClaimNames.Permission));
+        Assert.Equal(7L, token.GetPayloadValue<long>(ClaimNames.PermissionVersion));
+    }
+
     // --- Site admin tokens -------------------------------------------------------------------
+
+    [Fact]
+    public void IssueSiteAdmin_CarriesNoPermissionsAndNoVersion_BecauseASiteAdminsRightsAreTheRoleItself()
+    {
+        var token = new JsonWebToken(CreateIssuer().IssueSiteAdmin(_userId).Value);
+
+        Assert.False(token.TryGetClaim(ClaimNames.Permission, out _));
+        Assert.False(token.TryGetClaim(ClaimNames.PermissionVersion, out _));
+    }
 
     [Fact]
     public void IssueSiteAdmin_CarriesTheUserAndTheSiteAdminRole_ButNoAgency()
@@ -145,7 +197,7 @@ public sealed class JwtAccessTokenIssuerTests
     {
         foreach (var role in Enum.GetValues<OrganizationRole>())
         {
-            var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, role).Value);
+            var token = new JsonWebToken(CreateIssuer().Issue(_userId, _agencyId, role, Grants).Value);
 
             Assert.NotEqual("siteadmin", token.GetClaim(ClaimNames.Role).Value);
         }
@@ -154,7 +206,7 @@ public sealed class JwtAccessTokenIssuerTests
     [Fact]
     public async Task Issue_ATokenSignedByAnotherKey_IsNotValid()
     {
-        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin).Value;
+        var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).Value;
         _settings.SigningKey = new string('x', 48);
 
         Assert.False((await ValidateAsync(token)).IsValid);
@@ -163,7 +215,7 @@ public sealed class JwtAccessTokenIssuerTests
     [Fact]
     public async Task Issue_ATamperedToken_IsNotValid()
     {
-        var parts = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.ClientManager).Value.Split('.');
+        var parts = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.ClientManager, Grants).Value.Split('.');
         var forgedPayload = Convert.ToBase64String("""{"role":"organizationadmin"}"""u8.ToArray()).TrimEnd('=');
 
         Assert.False((await ValidateAsync($"{parts[0]}.{forgedPayload}.{parts[2]}")).IsValid);

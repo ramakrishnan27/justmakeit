@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Platform.Auth.DTOs;
 using Platform.Auth.Interfaces;
 using Platform.Auth.Models;
+using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Helpers.Tenancy;
 
@@ -16,7 +17,17 @@ public sealed class WorkspaceService(
 {
     public async Task<IReadOnlyList<WorkspaceResponse>> ListAsync(CancellationToken cancellationToken)
     {
-        var rows = await workspaces.ListAsync(tenant.RequireAgencyId(), tenant.RequireUserId(), cancellationToken);
+        var agencyId = tenant.RequireAgencyId();
+        var userId = tenant.RequireUserId();
+
+        // The workspaces.view policy already stopped everyone else; this is the same rule, checked
+        // again here so no other caller of the service can skip it.
+        if (!tenant.HasPermission(PermissionKeys.WorkspacesView))
+        {
+            throw new ForbiddenException("Your role is not allowed to see workspaces.", "insufficient_permission");
+        }
+
+        var rows = await workspaces.ListAsync(agencyId, userId, cancellationToken);
         return rows.Select(ToResponse).ToList();
     }
 
@@ -27,11 +38,11 @@ public sealed class WorkspaceService(
         var agencyId = tenant.RequireAgencyId();
         var userId = tenant.RequireUserId();
 
-        // The CanManage policy already stopped everyone else; this is the same rule, checked again
-        // here so no other caller of the service can skip it.
-        if (!RolePermissions.TryParse(tenant.Role, out var role) || !role.CanManage())
+        // The workspaces.create policy already stopped everyone else; this is the same rule, checked
+        // again here so no other caller of the service can skip it.
+        if (!tenant.HasPermission(PermissionKeys.WorkspacesCreate))
         {
-            throw new ForbiddenException("Only organization admins can create workspaces.", "insufficient_role");
+            throw new ForbiddenException("Your role is not allowed to create workspaces.", "insufficient_permission");
         }
 
         // An individual creator has the one workspace made at sign-up. No role reaches this point for a

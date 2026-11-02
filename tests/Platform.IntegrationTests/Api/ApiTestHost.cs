@@ -87,6 +87,12 @@ public sealed class ApiTestHost : IAsyncDisposable
         string cookieName = AgencyCookieName) =>
         SendAsync(HttpMethod.Post, path, body, accessToken, refreshCookie, remoteIp, cookieName);
 
+    public Task<HttpResponseMessage> PutAsync(string path, object? body = null, string? accessToken = null) =>
+        SendAsync(HttpMethod.Put, path, body, accessToken, null, null);
+
+    public Task<HttpResponseMessage> DeleteAsync(string path, string? accessToken = null) =>
+        SendAsync(HttpMethod.Delete, path, null, accessToken, null, null);
+
     private async Task<HttpResponseMessage> SendAsync(
         HttpMethod method,
         string path,

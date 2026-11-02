@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Platform.Auth.DTOs;
 using Platform.Auth.Interfaces;
 using Platform.Auth.Models;
@@ -11,6 +12,7 @@ using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Helpers.Tenancy;
 using Platform.Helpers.Utilities;
+using Platform.Infrastructure.Data;
 
 namespace Platform.Auth.Tests;
 
@@ -23,6 +25,7 @@ public sealed class AuthServiceTests
     private readonly IAgencyRepository _agencies = Substitute.For<IAgencyRepository>();
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IAccessTokenIssuer _accessTokens = Substitute.For<IAccessTokenIssuer>();
+    private readonly IPermissionService _permissions = Substitute.For<IPermissionService>();
     private readonly Pbkdf2PasswordHasher _hasher = new(iterations: 1_000);
     private readonly TenantContext _tenant = new();
     private readonly FixedTimeProvider _time = FixedTimeProvider.Create();
@@ -34,14 +37,16 @@ public sealed class AuthServiceTests
 
     public AuthServiceTests()
     {
-        _accessTokens.Issue(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<OrganizationRole>())
+        _accessTokens.Issue(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<OrganizationRole>(), Arg.Any<PermissionGrants>())
             .Returns(call => new AccessToken("access-token", _time.Now.AddMinutes(15)));
+        _permissions.GetGrantsAsync(Arg.Any<BusinessModel>(), Arg.Any<OrganizationRole>(), Arg.Any<CancellationToken>())
+            .Returns(call => new PermissionGrants(7, [$"granted-to-{call.ArgAt<OrganizationRole>(1).ToDb()}"]));
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(true);
         _refreshTokens.RotateAsync(Arg.Any<Guid>(), Arg.Any<NewRefreshToken>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(true);
 
         _service = new AuthService(
-            _accounts, _memberships, _agencies, _refreshTokens, _hasher, _accessTokens,
+            _accounts, _memberships, _agencies, _refreshTokens, _hasher, _accessTokens, _permissions,
             _tenant, Options.Create(_jwt), _time, NullLogger<AuthService>.Instance);
     }
 
@@ -150,7 +155,7 @@ public sealed class AuthServiceTests
         Assert.Equal(model, created!.BusinessModel);
         Assert.Equal(founderRole, created.Role);
         Assert.True(created.BusinessModel.IsAllowed(created.Role));
-        _accessTokens.Received(1).Issue(created.UserId, created.AgencyId, founderRole);
+        _accessTokens.Received(1).Issue(created.UserId, created.AgencyId, founderRole, Arg.Any<PermissionGrants>());
         Assert.Equal("access-token", result.Tokens.AccessToken);
         Assert.Equal("Bearer", result.Tokens.TokenType);
         Assert.Equal(15 * 60, result.Tokens.ExpiresIn);
@@ -170,7 +175,7 @@ public sealed class AuthServiceTests
 
         Assert.Equal(["businessModel"], exception.Errors!.Keys);
         await _accounts.DidNotReceiveWithAnyArgs().CreateAccountAsync(default!, default);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -209,7 +214,7 @@ public sealed class AuthServiceTests
 
         Assert.Equal("email_taken", exception.Code);
         await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -238,7 +243,7 @@ public sealed class AuthServiceTests
 
         var result = await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager);
+        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager, Arg.Any<PermissionGrants>());
         Assert.Equal("access-token", result.Tokens.AccessToken);
         await _memberships.Received(1).TouchAsync(recent, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
@@ -252,7 +257,7 @@ public sealed class AuthServiceTests
 
         await _service.LoginAsync(new LoginRequest("ana@example.com", Password, other), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, other, OrganizationRole.ClientManager);
+        _accessTokens.Received(1).Issue(_userId, other, OrganizationRole.ClientManager, Arg.Any<PermissionGrants>());
     }
 
     [Fact]
@@ -318,7 +323,7 @@ public sealed class AuthServiceTests
         var hasher = Substitute.For<IPasswordHasher>();
         hasher.DummyHash.Returns("pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==");
         var service = new AuthService(
-            _accounts, _memberships, _agencies, _refreshTokens, hasher, _accessTokens,
+            _accounts, _memberships, _agencies, _refreshTokens, hasher, _accessTokens, _permissions,
             _tenant, Options.Create(_jwt), _time, NullLogger<AuthService>.Instance);
         GivenUser(null);
 
@@ -363,6 +368,126 @@ public sealed class AuthServiceTests
         await _accounts.DidNotReceiveWithAnyArgs().FindLoginByEmailAsync(default!, default);
     }
 
+    // --- Permissions in the token ------------------------------------------------------------
+
+    [Theory]
+    [InlineData(BusinessModel.Company, OrganizationRole.OrganizationAdmin)]
+    [InlineData(BusinessModel.Agency, OrganizationRole.OrganizationAdmin)]
+    [InlineData(BusinessModel.Creator, OrganizationRole.ContentWriter)]
+    public async Task Register_PutsThePermissionsOfTheFoundersSlotInTheToken(BusinessModel model, OrganizationRole founder)
+    {
+        await _service.RegisterAsync(ValidRegistration(model.ToDb()), CancellationToken.None);
+
+        await _permissions.Received(1).GetGrantsAsync(model, founder, Arg.Any<CancellationToken>());
+        _accessTokens.Received(1).Issue(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            founder,
+            Arg.Is<PermissionGrants>(g => g.Version == 7 && g.Keys.SequenceEqual(new[] { $"granted-to-{founder.ToDb()}" })));
+    }
+
+    [Fact]
+    public async Task Login_PutsThePermissionsOfTheMembershipsModelAndRoleInTheToken()
+    {
+        GivenUser(StoredUser());
+        GivenMemberships(Membership(_agencyId, OrganizationRole.MarketingManager, businessModel: BusinessModel.Company));
+
+        await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
+
+        await _permissions.Received(1).GetGrantsAsync(BusinessModel.Company, OrganizationRole.MarketingManager, Arg.Any<CancellationToken>());
+        _accessTokens.Received(1).Issue(
+            _userId, _agencyId, OrganizationRole.MarketingManager, Arg.Is<PermissionGrants>(g => g.Keys.Contains("granted-to-marketingmanager")));
+    }
+
+    [Fact]
+    public async Task Refresh_ReadsThePermissionsOfTheModelAndRoleThatAreInTheDatabaseNow()
+    {
+        GivenStoredRefreshToken("token");
+        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>())
+            .Returns(Membership(_agencyId, OrganizationRole.MarketingManager, businessModel: BusinessModel.Company));
+
+        await _service.RefreshAsync("token", CancellationToken.None);
+
+        await _permissions.Received(1).GetGrantsAsync(BusinessModel.Company, OrganizationRole.MarketingManager, Arg.Any<CancellationToken>());
+        _accessTokens.Received(1).Issue(
+            _userId, _agencyId, OrganizationRole.MarketingManager, Arg.Is<PermissionGrants>(g => g.Version == 7));
+    }
+
+    [Fact]
+    public async Task SwitchAgency_PutsThePermissionsOfTheTargetsModelAndRoleInTheToken()
+    {
+        var target = Guid.NewGuid();
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>())
+            .Returns(Membership(target, OrganizationRole.ContentWriter, businessModel: BusinessModel.Creator));
+
+        await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), null, CancellationToken.None);
+
+        await _permissions.Received(1).GetGrantsAsync(BusinessModel.Creator, OrganizationRole.ContentWriter, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Refresh_WhenThePermissionsCannotBeRead_RotatesNothing_SoTheCookieIsNotLost()
+    {
+        GivenStoredRefreshToken("token");
+        GivenMembership(OrganizationRole.ContentWriter);
+        GivenThePermissionsCannotBeRead();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.RefreshAsync("token", CancellationToken.None));
+
+        // Rotating first would have thrown the browser's cookie away and made the next try look like a stolen token.
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task Register_WhenThePermissionsCannotBeRead_CreatesNoAccount()
+    {
+        GivenThePermissionsCannotBeRead();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.RegisterAsync(ValidRegistration(), CancellationToken.None));
+
+        await _accounts.DidNotReceiveWithAnyArgs().CreateAccountAsync(default!, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task Login_WhenThePermissionsCannotBeRead_StoresNoRefreshTokenAndTouchesNothing()
+    {
+        GivenUser(StoredUser());
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter));
+        GivenThePermissionsCannotBeRead();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None));
+
+        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+        await _memberships.DidNotReceiveWithAnyArgs().TouchAsync(default, default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task SwitchAgency_WhenThePermissionsCannotBeRead_ChangesNothing()
+    {
+        var target = Guid.NewGuid();
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.ClientManager));
+        var current = GivenStoredRefreshToken("current-cookie");
+        GivenThePermissionsCannotBeRead();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), "current-cookie", CancellationToken.None));
+
+        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAsync(default, default, default, default, default);
+        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+        Assert.NotNull(current);
+    }
+
+    private void GivenThePermissionsCannotBeRead() =>
+        _permissions.GetGrantsAsync(Arg.Any<BusinessModel>(), Arg.Any<OrganizationRole>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("The database is not reachable."));
+
     // --- Refresh -----------------------------------------------------------------------------
 
     [Fact]
@@ -384,7 +509,7 @@ public sealed class AuthServiceTests
         Assert.Equal(_userId, replacement.UserId);
         Assert.Equal(_agencyId, replacement.AgencyId);
         Assert.Equal(_time.Now.AddDays(30), result.RefreshTokenExpiresAt);
-        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ContentWriter);
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ContentWriter, Arg.Any<PermissionGrants>());
         await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
     }
 
@@ -409,7 +534,7 @@ public sealed class AuthServiceTests
 
         await _service.RefreshAsync("token", CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ClientManager);
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ClientManager, Arg.Any<PermissionGrants>());
     }
 
     [Theory]
@@ -476,7 +601,7 @@ public sealed class AuthServiceTests
         Assert.Equal("invalid_refresh_token", exception.Code);
         await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
         await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -500,7 +625,7 @@ public sealed class AuthServiceTests
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("raced", CancellationToken.None));
 
         await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -568,7 +693,7 @@ public sealed class AuthServiceTests
 
         var result = await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), null, CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, target, OrganizationRole.ClientManager);
+        _accessTokens.Received(1).Issue(_userId, target, OrganizationRole.ClientManager, Arg.Any<PermissionGrants>());
         Assert.Equal("access-token", result.Tokens.AccessToken);
         await _memberships.Received(1).TouchAsync(target, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
@@ -718,7 +843,7 @@ public sealed class AuthServiceTests
             () => _service.LoginAsync(new LoginRequest("maya@gmail.com", typed.Length == 0 ? "x" : typed, null), CancellationToken.None));
 
         Assert.Equal("invalid_credentials", exception.Code);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
         await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
     }
 
@@ -759,7 +884,7 @@ public sealed class AuthServiceTests
 
         var result = await _service.RegisterExternalAsync(GoogleRegistration(BusinessModel.Creator), CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(created!.UserId, created.AgencyId, OrganizationRole.ContentWriter);
+        _accessTokens.Received(1).Issue(created!.UserId, created.AgencyId, OrganizationRole.ContentWriter, Arg.Any<PermissionGrants>());
         Assert.Equal("access-token", result.Tokens.AccessToken);
         Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored!.TokenHash);
         Assert.NotEqual(result.RefreshToken, stored.TokenHash);
@@ -801,7 +926,7 @@ public sealed class AuthServiceTests
 
         await _service.LoginExternalAsync(_userId, CancellationToken.None);
 
-        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager);
+        _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager, Arg.Any<PermissionGrants>());
         await _memberships.Received(1).TouchAsync(recent, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
 
@@ -813,6 +938,6 @@ public sealed class AuthServiceTests
         var exception = await AssertThrowsAsync<ForbiddenException>(() => _service.LoginExternalAsync(_userId, CancellationToken.None));
 
         Assert.Equal("no_agency", exception.Code);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 }
