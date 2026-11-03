@@ -65,21 +65,6 @@ public static class DbTestSupport
         return (Guid)(await command.ExecuteScalarAsync())!;
     }
 
-    public static async Task<Guid> InsertRefreshTokenAsync(NpgsqlConnection owner, Guid agencyId, Guid userId, string tokenHash)
-    {
-        await using var command = new NpgsqlCommand(
-            "INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, now() + interval '1 day') RETURNING id", owner)
-        {
-            Parameters =
-            {
-                new NpgsqlParameter<Guid> { TypedValue = agencyId },
-                new NpgsqlParameter<Guid> { TypedValue = userId },
-                new NpgsqlParameter<string> { TypedValue = tokenHash }
-            }
-        };
-        return (Guid)(await command.ExecuteScalarAsync())!;
-    }
-
     /// <summary>Runs a statement with positional parameters ($1, $2, ...) and returns the rows affected.</summary>
     public static async Task<int> ExecuteAsync(NpgsqlConnection connection, string sql, params object[] values)
     {

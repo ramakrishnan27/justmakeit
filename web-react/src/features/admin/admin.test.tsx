@@ -1,8 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { formatDate } from '@/lib/format';
 import { adminApp } from '@/navigation/apps';
 import { jsonResponse, requestLine } from '@/test/helpers';
-import { adminServer, adminVisitorServer, organization, paged, renderApp } from '@/test/renderApp';
+import { adminServer, adminVisitorServer, organization, paged, renderApp, sessionEndsAt } from '@/test/renderApp';
 
 const heading = (name: string | RegExp) => screen.findByRole('heading', { level: 1, name });
 const type = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -262,32 +263,27 @@ describe('the Site admin dashboard', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/no longer a site admin/);
   });
 
-  it('shows the claims of the token, which name no organization', async () => {
+  it('shows who is signed in and until when, which names no organization', async () => {
     await open('/admin', adminServer());
     await heading('Dashboard');
 
     const session = (await screen.findByRole('region', { name: 'Your session' })) as HTMLElement;
     expect(within(session).getByText('u1')).toBeTruthy();
     expect(within(session).getByText('siteadmin')).toBeTruthy();
+    expect(within(session).getByText('Signed in until')).toBeTruthy();
+    expect(within(session).getByText(formatDate(sessionEndsAt, { withTime: true }))).toBeTruthy();
     expect(within(session).queryByText('Plan')).toBeNull();
   });
 
-  it('becomes the sign-in page when the session can no longer be renewed', async () => {
-    let cookieIsGood = true;
-    const { api } = await open(
-      '/admin',
-      adminServer({}, {
-        'POST /v1/site/refresh': () => (cookieIsGood ? jsonResponse(200, { accessToken: 'again' }) : jsonResponse(401, {})),
-        'GET /v1/site/anything': () => jsonResponse(401, {}),
-      }),
-    );
+  it('becomes the sign-in page when a request finds the sign-in is over, without trying to renew it', async () => {
+    const { api, fetchFn } = await open('/admin', adminServer({}, { 'GET /v1/site/anything': () => jsonResponse(401, {}) }));
     await heading('Dashboard');
-    cookieIsGood = false;
 
     await act(async () => {
       await api.request('/v1/site/anything').catch(() => undefined);
     });
 
     expect(await heading('Site admin sign in')).toBeTruthy();
+    expect(fetchFn.calls.map((call) => call.path).filter((path) => path.includes('refresh'))).toEqual([]);
   });
 });

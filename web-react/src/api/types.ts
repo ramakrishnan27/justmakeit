@@ -31,12 +31,16 @@ export interface MeResponse {
   agency: Organization;
   role: OrganizationRole;
   memberships: Membership[];
+  /** When the sign-in ends and the person has to sign in again (the token's own expiry), as an ISO date. */
+  sessionExpiresAt: string | null;
 }
 
-export interface TokenResponse {
-  accessToken: string;
-  tokenType: string;
-  expiresIn: number;
+/**
+ * What signing in answers with. The access token is not here and never reaches a script: the server keeps it in an
+ * HttpOnly cookie, and the page learns who is signed in from `me`.
+ */
+export interface SessionResponse {
+  expiresAt: string;
 }
 
 export interface Workspace {
@@ -64,6 +68,8 @@ export interface SiteMeResponse {
   user: User;
   /** Always `siteadmin`: it is what the access token's role claim carries. */
   role: 'siteadmin';
+  /** When the sign-in ends and the Site admin has to sign in again, as an ISO date. */
+  sessionExpiresAt: string | null;
 }
 
 /** Platform totals. */

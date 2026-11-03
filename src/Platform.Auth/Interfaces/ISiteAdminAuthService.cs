@@ -11,10 +11,5 @@ public interface ISiteAdminAuthService
     /// </summary>
     Task<AuthResult> LoginAsync(SiteLoginRequest request, CancellationToken cancellationToken);
 
-    /// <summary>Rotates the site refresh token, with the same reuse detection as the agency sessions.</summary>
-    Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken cancellationToken);
-
-    Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken);
-
     Task<SiteMeResponse> GetMeAsync(CancellationToken cancellationToken);
 }

@@ -1,9 +1,6 @@
-using System.Globalization;
 using System.Net;
-using System.Text.RegularExpressions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Platform.Auth.Services;
-using Platform.Helpers.Utilities;
 using Platform.IntegrationTests.Infrastructure;
 
 namespace Platform.IntegrationTests.Api;
@@ -17,7 +14,7 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
 
     private readonly Pbkdf2PasswordHasher _hasher = new(iterations: 1_000);
 
-    private sealed record SiteSession(string Email, Guid UserId, string AccessToken, string RefreshToken);
+    private sealed record SiteSession(string Email, Guid UserId, string AccessToken);
 
     private async Task<(Guid UserId, string Email)> CreateSiteAdminAsync(string? email = null)
     {
@@ -39,20 +36,17 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         var (userId, address) = email is null ? await CreateSiteAdminAsync() : (Guid.Empty, email);
         var response = await SiteLoginRawAsync(address, password);
         response.EnsureSuccessStatusCode();
-        var accessToken = (await ApiTestHost.ReadJsonAsync(response)).GetProperty("accessToken").GetString()!;
-        return new SiteSession(address, userId, accessToken, ApiTestHost.SiteCookieValue(response)!);
+        return new SiteSession(address, userId, ApiTestHost.SiteCookieValue(response)!);
     }
 
-    private Task<HttpResponseMessage> SiteRefreshAsync(string? cookie) =>
-        Host.PostAsync("/v1/site/refresh", refreshCookie: cookie, cookieName: ApiTestHost.SiteCookieName);
-
-    private async Task<long> LiveSiteTokensAsync(Guid userId) => await OwnerQueryAsync<long>(
-        "SELECT count(*) FROM site_admin_refresh_tokens WHERE user_id = @userId AND revoked_at IS NULL", new { userId });
+    /// <summary>A GET as the browser makes it: the Site admin cookie, which is the one a /v1/site route reads.</summary>
+    private Task<HttpResponseMessage> SiteGetAsync(string path, SiteSession session) =>
+        Host.GetAsync(path, tokenCookie: session.AccessToken, cookieName: ApiTestHost.SiteCookieName);
 
     // --- Login and the token -----------------------------------------------------------------
 
     [Fact]
-    public async Task Login_Returns200_WithAFifteenMinuteAccessToken_AndNoRefreshTokenInTheBody()
+    public async Task Login_Returns200_AndTheBodyOnlySaysWhenTheSignInEnds_NeverTheToken()
     {
         var (_, email) = await CreateSiteAdminAsync();
 
@@ -61,22 +55,20 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         AssertStatus(HttpStatusCode.OK, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
         var body = await ApiTestHost.ReadJsonAsync(response);
-        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("accessToken").GetString()));
-        Assert.Equal("Bearer", body.GetProperty("tokenType").GetString());
-        Assert.Equal(900, body.GetProperty("expiresIn").GetInt32());
-        Assert.DoesNotContain(body.EnumerateObject(), p => p.Name.Contains("refresh", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(["expiresAt"], body.EnumerateObject().Select(p => p.Name));
+        Assert.DoesNotContain(ApiTestHost.SiteCookieValue(response)!, body.ToString());
     }
 
     [Fact]
-    public async Task Login_Token_ContainsTheUserId_AndTheSiteAdminRole_ButNoAgency()
+    public async Task Login_Token_ContainsTheUserId_AndTheSiteAdminRole_ButNoAgency_ForThirtyDays()
     {
         var (userId, email) = await CreateSiteAdminAsync();
 
         var response = await SiteLoginRawAsync(email);
 
-        var token = new JsonWebToken((await ApiTestHost.ReadJsonAsync(response)).GetProperty("accessToken").GetString()!);
+        var token = new JsonWebToken(ApiTestHost.SiteCookieValue(response)!);
         Assert.Equal("HS256", token.Alg);
-        Assert.Equal(TimeSpan.FromMinutes(15), token.ValidTo - token.ValidFrom);
+        Assert.Equal(TimeSpan.FromDays(30), token.ValidTo - token.ValidFrom);
         Assert.Equal(userId.ToString(), token.GetClaim("user_id").Value);
         Assert.Equal("siteadmin", token.GetClaim("role").Value);
         Assert.False(token.TryGetClaim("agency_id", out _));
@@ -95,26 +87,13 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/v1/site", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response)); // no agency cookie is issued
+        Assert.Null(ApiTestHost.MemberCookieHeader(response)); // no member cookie is issued
 
         var value = ApiTestHost.SiteCookieValue(response)!;
-        Assert.Matches("^[A-Za-z0-9_-]{43}$", value);
+        Assert.Equal(3, value.Split('.').Length); // header.payload.signature
         Assert.DoesNotContain(value, await response.Content.ReadAsStringAsync());
-        var expires = DateTimeOffset.Parse(
-            Regex.Match(cookie, "expires=([^;]+)", RegexOptions.IgnoreCase).Groups[1].Value, CultureInfo.InvariantCulture);
+        var expires = ApiTestHost.CookieExpires(response, ApiTestHost.SiteCookieName)!.Value;
         Assert.InRange((expires - DateTimeOffset.UtcNow).TotalDays, 29.9, 30.1);
-    }
-
-    [Fact]
-    public async Task Login_StoresOnlyTheSha256HashOfTheRefreshToken()
-    {
-        var session = await SiteLoginAsync();
-
-        var stored = await OwnerQueryAsync<string>(
-            "SELECT token_hash FROM site_admin_refresh_tokens WHERE user_id = @userId", new { userId = session.UserId });
-
-        Assert.Equal(HashHelper.Sha256Hex(session.RefreshToken), stored);
-        Assert.NotEqual(session.RefreshToken, stored);
     }
 
     [Fact]
@@ -127,7 +106,6 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         AssertStatus(HttpStatusCode.Unauthorized, response);
         Assert.Equal("invalid_credentials", await CodeOfAsync(response));
         Assert.Null(ApiTestHost.SiteCookieHeader(response));
-        Assert.Equal(0, await OwnerQueryAsync<long>("SELECT count(*) FROM site_admin_refresh_tokens"));
     }
 
     [Fact]
@@ -162,11 +140,11 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
     // --- The dashboard data ------------------------------------------------------------------
 
     [Fact]
-    public async Task Me_ReturnsTheSiteAdmin()
+    public async Task Me_ReturnsTheSiteAdmin_AndWhenTheSignInEnds()
     {
         var session = await SiteLoginAsync();
 
-        var response = await Host.GetAsync("/v1/site/me", session.AccessToken);
+        var response = await SiteGetAsync("/v1/site/me", session);
 
         AssertStatus(HttpStatusCode.OK, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
@@ -176,6 +154,10 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         Assert.Equal("Root Admin", me.GetProperty("user").GetProperty("fullName").GetString());
         Assert.Equal("siteadmin", me.GetProperty("role").GetString());
         Assert.False(me.GetProperty("user").TryGetProperty("passwordHash", out _));
+        Assert.InRange(
+            me.GetProperty("sessionExpiresAt").GetDateTimeOffset(),
+            DateTimeOffset.UtcNow.AddDays(30).AddMinutes(-2),
+            DateTimeOffset.UtcNow.AddDays(30).AddMinutes(2));
     }
 
     [Fact]
@@ -187,7 +169,7 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         await OwnerExecuteAsync("UPDATE agencies SET plan = 'paid' WHERE id = @id", new { id = bravo.AgencyId });
         var session = await SiteLoginAsync();
 
-        var response = await Host.GetAsync("/v1/site/overview", session.AccessToken);
+        var response = await SiteGetAsync("/v1/site/overview", session);
 
         AssertStatus(HttpStatusCode.OK, response);
         var overview = await ApiTestHost.ReadJsonAsync(response);
@@ -207,7 +189,7 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         await Host.PostAsync("/v1/workspaces", new { name = "Bravo client" }, bravo.AccessToken);
         var session = await SiteLoginAsync();
 
-        var response = await Host.GetAsync("/v1/site/agencies", session.AccessToken);
+        var response = await SiteGetAsync("/v1/site/agencies", session);
 
         AssertStatus(HttpStatusCode.OK, response);
         var page = await ApiTestHost.ReadJsonAsync(response);
@@ -235,9 +217,9 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
 
         var session = await SiteLoginAsync();
 
-        var first = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/site/agencies?page=1&pageSize=2", session.AccessToken));
-        var second = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/site/agencies?page=2&pageSize=2", session.AccessToken));
-        var beyond = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/site/agencies?page=9&pageSize=2", session.AccessToken));
+        var first = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/agencies?page=1&pageSize=2", session));
+        var second = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/agencies?page=2&pageSize=2", session));
+        var beyond = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/agencies?page=9&pageSize=2", session));
 
         Assert.Equal(["Charlie", "Bravo"], first.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("name").GetString()));
         Assert.Equal(["Alpha"], second.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("name").GetString()));
@@ -257,7 +239,10 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
     {
         var owner = await Host.RegisterAsync();
 
+        // The owner's token as a header is a real token, and it is refused for what it is: not a Site admin's.
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync(path, owner.AccessToken));
+        // Sent as a cookie, as the browser would, it is not even read on a Site admin route.
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync(path, tokenCookie: owner.AccessToken));
     }
 
     [Fact]
@@ -268,6 +253,8 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync("/v1/workspaces", session.AccessToken));
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync("/v1/auth/me", session.AccessToken));
         AssertStatus(HttpStatusCode.Forbidden, await Host.PostAsync("/v1/workspaces", new { name = "x" }, session.AccessToken));
+        // Their cookie is for /v1/site and is never read anywhere else, even if a client sends it.
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", tokenCookie: session.AccessToken, cookieName: ApiTestHost.SiteCookieName));
     }
 
     [Fact]
@@ -279,25 +266,48 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         var agency = await Host.LoginAsync(owner.Email);
         var site = await SiteLoginAsync(owner.Email, ApiTestHost.DefaultPassword);
 
-        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", agency.AccessToken));
+        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", tokenCookie: agency.AccessToken));
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync("/v1/site/overview", agency.AccessToken));
-        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/site/overview", site.AccessToken));
+        AssertStatus(HttpStatusCode.OK, await SiteGetAsync("/v1/site/overview", site));
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync("/v1/workspaces", site.AccessToken));
     }
 
     [Fact]
-    public async Task ASiteAdminsRefreshToken_IsNotAnAgencyRefreshToken_AndTheOtherWayAround()
+    public async Task WhenTheBrowserSendsBothCookiesToASiteRoute_OnlyTheSiteOneDecides()
+    {
+        // The member cookie is scoped to /v1, so a browser sends it to /v1/site as well, next to the Site admin one.
+        var owner = await Host.RegisterAsync();
+        var site = await SiteLoginAsync();
+
+        var response = await Host.GetWithCookiesAsync(
+            "/v1/site/overview", (ApiTestHost.MemberCookieName, owner.AccessToken), (ApiTestHost.SiteCookieName, site.AccessToken));
+
+        AssertStatus(HttpStatusCode.OK, response);
+    }
+
+    [Fact]
+    public async Task WhenTheBrowserSendsBothCookiesToAMemberRoute_OnlyTheMemberOneDecides()
+    {
+        // The Site admin cookie is not sent outside /v1/site by a browser, but if it were it must not matter.
+        var owner = await Host.RegisterAsync();
+        var site = await SiteLoginAsync();
+
+        var response = await Host.GetWithCookiesAsync(
+            "/v1/workspaces", (ApiTestHost.MemberCookieName, owner.AccessToken), (ApiTestHost.SiteCookieName, site.AccessToken));
+
+        AssertStatus(HttpStatusCode.OK, response);
+    }
+
+    [Fact]
+    public async Task ATokenInAnAuthorizationHeader_WinsOverACookie()
     {
         var owner = await Host.RegisterAsync();
         var site = await SiteLoginAsync();
 
-        // Each cookie is looked up only in its own table, so one kind of token never opens the other's session.
-        var siteTokenAsAgency = await Host.PostAsync("/v1/auth/refresh", refreshCookie: site.RefreshToken);
-        var agencyTokenAsSite = await Host.PostAsync(
-            "/v1/site/refresh", refreshCookie: owner.RefreshToken, cookieName: ApiTestHost.SiteCookieName);
+        // A header names the token that the request is judged by; the cookie next to it is not consulted.
+        var response = await Host.GetAsync("/v1/site/overview", owner.AccessToken, tokenCookie: site.AccessToken, cookieName: ApiTestHost.SiteCookieName);
 
-        AssertStatus(HttpStatusCode.Unauthorized, siteTokenAsAgency);
-        AssertStatus(HttpStatusCode.Unauthorized, agencyTokenAsSite);
+        AssertStatus(HttpStatusCode.Forbidden, response);
     }
 
     // --- Losing the role ---------------------------------------------------------------------
@@ -308,30 +318,17 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         var session = await SiteLoginAsync();
         await OwnerExecuteAsync("DELETE FROM site_admins WHERE user_id = @userId", new { userId = session.UserId });
 
-        // The token still says siteadmin for up to 15 minutes, so the policy and the service let the call
+        // The token still says siteadmin until it expires (30 days), so the policy and the service let the call
         // through; it is the database function that says no.
-        var overview = await Host.GetAsync("/v1/site/overview", session.AccessToken);
-        var agencies = await Host.GetAsync("/v1/site/agencies", session.AccessToken);
-        var me = await Host.GetAsync("/v1/site/me", session.AccessToken);
+        var overview = await SiteGetAsync("/v1/site/overview", session);
+        var agencies = await SiteGetAsync("/v1/site/agencies", session);
+        var me = await SiteGetAsync("/v1/site/me", session);
 
         AssertStatus(HttpStatusCode.Forbidden, overview);
         Assert.Equal("not_site_admin", await CodeOfAsync(overview));
         AssertStatus(HttpStatusCode.Forbidden, agencies);
         AssertStatus(HttpStatusCode.Unauthorized, me);
         Assert.Equal("not_site_admin", await CodeOfAsync(me));
-    }
-
-    [Fact]
-    public async Task AfterTheUserIsNoLongerASiteAdmin_TheyCannotRefresh_AndTheirTokensAreRevoked()
-    {
-        var session = await SiteLoginAsync();
-        await OwnerExecuteAsync("DELETE FROM site_admins WHERE user_id = @userId", new { userId = session.UserId });
-
-        var response = await SiteRefreshAsync(session.RefreshToken);
-
-        AssertStatus(HttpStatusCode.Unauthorized, response);
-        Assert.Equal("invalid_refresh_token", await CodeOfAsync(response));
-        Assert.Equal(0, await LiveSiteTokensAsync(session.UserId));
     }
 
     [Fact]
@@ -343,123 +340,32 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         AssertStatus(HttpStatusCode.Unauthorized, await SiteLoginRawAsync(email));
     }
 
-    // --- Refresh -----------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Refresh_ReturnsAWorkingSiteAdminToken_AndANewCookie()
-    {
-        var session = await SiteLoginAsync();
-
-        var response = await SiteRefreshAsync(session.RefreshToken);
-
-        AssertStatus(HttpStatusCode.OK, response);
-        Assert.True(response.Headers.CacheControl?.NoStore);
-        var newCookie = ApiTestHost.SiteCookieValue(response);
-        Assert.NotNull(newCookie);
-        Assert.NotEqual(session.RefreshToken, newCookie);
-        Assert.Contains("path=/v1/site", ApiTestHost.SiteCookieHeader(response)!, StringComparison.OrdinalIgnoreCase);
-
-        var body = await ApiTestHost.ReadJsonAsync(response);
-        Assert.DoesNotContain(body.EnumerateObject(), p => p.Name.Contains("refresh", StringComparison.OrdinalIgnoreCase));
-        var token = new JsonWebToken(body.GetProperty("accessToken").GetString()!);
-        Assert.Equal(session.UserId.ToString(), token.GetClaim("user_id").Value);
-        Assert.Equal("siteadmin", token.GetClaim("role").Value);
-        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/site/overview", token.EncodedToken));
-        Assert.Equal(1, await LiveSiteTokensAsync(session.UserId));
-    }
-
-    [Fact]
-    public async Task Refresh_ReplayOfARotatedToken_IsRejected_AndEndsTheWholeSession()
-    {
-        var session = await SiteLoginAsync();
-        var rotated = await SiteRefreshAsync(session.RefreshToken);
-        var newCookie = ApiTestHost.SiteCookieValue(rotated)!;
-
-        var replay = await SiteRefreshAsync(session.RefreshToken);
-
-        AssertStatus(HttpStatusCode.Unauthorized, replay);
-        Assert.Equal("invalid_refresh_token", await CodeOfAsync(replay));
-        AssertStatus(HttpStatusCode.Unauthorized, await SiteRefreshAsync(newCookie));
-        Assert.Equal(0, await LiveSiteTokensAsync(session.UserId));
-    }
-
-    [Fact]
-    public async Task Refresh_WhenManyRequestsPresentTheSameCookie_AtMostOneSucceeds()
-    {
-        var session = await SiteLoginAsync();
-
-        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() => SiteRefreshAsync(session.RefreshToken))));
-
-        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
-        Assert.Equal(5, responses.Count(r => r.StatusCode == HttpStatusCode.Unauthorized));
-        Assert.Equal(0, await LiveSiteTokensAsync(session.UserId));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("garbage")]
-    public async Task Refresh_WithoutAValidCookie_Returns401(string? cookie)
-    {
-        var response = await SiteRefreshAsync(cookie);
-
-        AssertStatus(HttpStatusCode.Unauthorized, response);
-        Assert.Equal("invalid_refresh_token", await CodeOfAsync(response));
-        Assert.Null(ApiTestHost.SiteCookieHeader(response));
-    }
-
-    [Fact]
-    public async Task Refresh_OfAnExpiredToken_Returns401_AndIssuesNothing()
-    {
-        var session = await SiteLoginAsync();
-        await OwnerExecuteAsync(
-            "UPDATE site_admin_refresh_tokens SET expires_at = now() - interval '1 minute' WHERE user_id = @userId",
-            new { userId = session.UserId });
-
-        AssertStatus(HttpStatusCode.Unauthorized, await SiteRefreshAsync(session.RefreshToken));
-        Assert.Equal(1, await OwnerQueryAsync<long>("SELECT count(*) FROM site_admin_refresh_tokens"));
-    }
-
-    [Fact]
-    public async Task Refresh_DoesNotNeedAnAccessToken_AndIgnoresAnExpiredOne()
-    {
-        var session = await SiteLoginAsync();
-
-        var response = await Host.PostAsync(
-            "/v1/site/refresh", accessToken: "an-expired-access-token", refreshCookie: session.RefreshToken, cookieName: ApiTestHost.SiteCookieName);
-
-        AssertStatus(HttpStatusCode.OK, response);
-    }
-
     // --- Logout ------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Logout_Returns204_ExpiresTheSiteCookie_AndEndsTheSession()
+    public async Task Logout_Returns204_AndExpiresTheSiteCookieAtTheSamePathItWasSetAt()
     {
         var session = await SiteLoginAsync();
 
-        var response = await Host.PostAsync(
-            "/v1/site/logout", refreshCookie: session.RefreshToken, cookieName: ApiTestHost.SiteCookieName);
+        var response = await Host.PostAsync("/v1/site/logout", tokenCookie: session.AccessToken, cookieName: ApiTestHost.SiteCookieName);
 
         AssertStatus(HttpStatusCode.NoContent, response);
         var cookie = ApiTestHost.SiteCookieHeader(response)!;
         Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/v1/site", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, await LiveSiteTokensAsync(session.UserId));
-        AssertStatus(HttpStatusCode.Unauthorized, await SiteRefreshAsync(session.RefreshToken));
+        Assert.Null(ApiTestHost.SiteCookieValue(response));
+        Assert.Null(ApiTestHost.MemberCookieHeader(response));
     }
 
     [Fact]
-    public async Task Logout_EndsOnlyTheSessionItWasGiven()
+    public async Task Logout_OnlyClearsTheBrowsersCookie_ATokenThatWasCopiedStaysValidUntilItExpires()
     {
-        var (_, email) = await CreateSiteAdminAsync();
-        var first = await SiteLoginAsync(email);
-        var second = await SiteLoginAsync(email);
-        Assert.NotEqual(first.RefreshToken, second.RefreshToken);
+        // Nothing is stored for a session, so there is nothing to revoke. This is the price of having no refresh token.
+        var session = await SiteLoginAsync();
 
-        await Host.PostAsync("/v1/site/logout", refreshCookie: first.RefreshToken, cookieName: ApiTestHost.SiteCookieName);
+        await Host.PostAsync("/v1/site/logout", tokenCookie: session.AccessToken, cookieName: ApiTestHost.SiteCookieName);
 
-        AssertStatus(HttpStatusCode.OK, await SiteRefreshAsync(second.RefreshToken));
+        AssertStatus(HttpStatusCode.OK, await SiteGetAsync("/v1/site/overview", session));
     }
 
     // --- The first site admin, created when the app starts -----------------------------------
@@ -478,8 +384,8 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         var login = await host.PostAsync("/v1/site/login", new { email = "first.admin@example.com", password = "the very first password" });
 
         AssertStatus(HttpStatusCode.OK, login);
-        var accessToken = (await ApiTestHost.ReadJsonAsync(login)).GetProperty("accessToken").GetString()!;
-        var overview = await host.GetAsync("/v1/site/overview", accessToken);
+        var accessToken = ApiTestHost.SiteCookieValue(login)!;
+        var overview = await host.GetAsync("/v1/site/overview", tokenCookie: accessToken, cookieName: ApiTestHost.SiteCookieName);
         AssertStatus(HttpStatusCode.OK, overview);
         Assert.Equal(0, (await ApiTestHost.ReadJsonAsync(overview)).GetProperty("agencies").GetInt32());
     }

@@ -119,8 +119,7 @@ class AdminDashboard extends HTMLElement {
   }
 
   renderSession() {
-    const claims = this.context.session.getClaims() ?? {};
-    const expires = typeof claims.exp === 'number' ? formatDate(claims.exp * 1000, { withTime: true }) : '–';
+    const { user, role, expiresAt } = this.context.session.state;
 
     return h(
       'div',
@@ -128,11 +127,11 @@ class AdminDashboard extends HTMLElement {
       h(
         'dl',
         { class: 'kv' },
-        h('div', {}, h('dt', {}, 'User ID'), h('dd', { class: 'mono' }, String(claims.user_id ?? '–'))),
-        h('div', {}, h('dt', {}, 'Role'), h('dd', {}, h('span', { class: 'badge badge-accent' }, String(claims.role ?? '–')))),
-        h('div', {}, h('dt', {}, 'Token expires'), h('dd', {}, expires)),
+        h('div', {}, h('dt', {}, 'User ID'), h('dd', { class: 'mono' }, String(user?.id ?? '–'))),
+        h('div', {}, h('dt', {}, 'Role'), h('dd', {}, h('span', { class: 'badge badge-accent' }, String(role ?? '–')))),
+        h('div', {}, h('dt', {}, 'Signed in until'), h('dd', {}, formatDate(expiresAt, { withTime: true }))),
       ),
-      h('p', { class: 'muted small' }, 'These come from your access token. It is kept in memory only and is renewed automatically while you work.'),
+      h('p', { class: 'muted small' }, 'Your sign-in is kept in a cookie this page cannot read. It is not renewed: when it ends you sign in again.'),
     );
   }
 

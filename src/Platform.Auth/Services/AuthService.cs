@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Platform.Auth.DTOs;
 using Platform.Auth.Interfaces;
 using Platform.Auth.Models;
-using Platform.Auth.Settings;
 using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Helpers.Tenancy;
@@ -15,19 +13,14 @@ public sealed class AuthService(
     IAccountRepository accounts,
     IMembershipRepository memberships,
     IAgencyRepository agencies,
-    IRefreshTokenRepository refreshTokens,
     IPasswordHasher passwordHasher,
     IAccessTokenIssuer accessTokens,
     IPermissionService permissions,
     ITenantContext tenant,
-    IOptions<JwtSettings> jwtOptions,
     TimeProvider time,
     ILogger<AuthService> logger) : IAuthService
 {
     public const string DefaultWorkspaceName = "Main workspace";
-
-    // Longer than any token we hand out; anything bigger is junk and is not worth hashing.
-    private const int MaxRefreshTokenLength = 256;
 
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
     {
@@ -87,7 +80,7 @@ public sealed class AuthService(
 
         logger.LogInformation(
             "Registered user {UserId} with new {BusinessModel} organization {AgencyId}", account.UserId, account.BusinessModel, account.AgencyId);
-        return await StartSessionAsync(account.UserId, account.AgencyId, account.Role, grants, cancellationToken);
+        return BuildResult(account.UserId, account.AgencyId, account.Role, grants);
     }
 
     public async Task<AuthResult> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -131,65 +124,10 @@ public sealed class AuthService(
         await memberships.TouchAsync(membership.AgencyId, userId, time.GetUtcNow(), cancellationToken);
 
         logger.LogInformation("User {UserId} signed in to agency {AgencyId}", userId, membership.AgencyId);
-        return await StartSessionAsync(userId, membership.AgencyId, membership.Role, grants, cancellationToken);
+        return BuildResult(userId, membership.AgencyId, membership.Role, grants);
     }
 
-    public async Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken cancellationToken)
-    {
-        var presented = await FindRefreshTokenAsync(refreshToken, cancellationToken) ?? throw InvalidRefreshToken();
-        var now = time.GetUtcNow();
-
-        if (presented.RevokedAt is not null)
-        {
-            // A token that was already rotated or revoked is being used again: it was copied. We cannot
-            // tell the thief from the owner, so every live token of this user for this agency ends.
-            await RevokeAllAfterReuseAsync(presented, now, cancellationToken);
-            throw InvalidRefreshToken();
-        }
-
-        if (presented.ExpiresAt <= now)
-        {
-            throw InvalidRefreshToken();
-        }
-
-        // The role comes from the database, not the old token, so a changed role or a removal takes
-        // effect at the next refresh at the latest.
-        var membership = await memberships.FindAsync(presented.UserId, presented.AgencyId, cancellationToken);
-        if (membership is null)
-        {
-            await refreshTokens.RevokeAllAsync(presented.AgencyId, presented.UserId, now, cancellationToken);
-            throw InvalidRefreshToken();
-        }
-
-        // The permissions come from the database too. They are read before the old token is rotated: if
-        // reading them failed afterwards, the cookie would be lost with the rotated token and the next
-        // attempt would look like a stolen token being reused.
-        var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
-
-        var (rawToken, replacement) = NewRefreshToken(presented.UserId, presented.AgencyId, now);
-        if (!await refreshTokens.RotateAsync(presented.Id, replacement, now, cancellationToken))
-        {
-            // Someone else revoked this token between our check and the rotation: same as reuse.
-            await RevokeAllAfterReuseAsync(presented, now, cancellationToken);
-            throw InvalidRefreshToken();
-        }
-
-        return BuildResult(presented.UserId, presented.AgencyId, membership.Role, grants, rawToken, replacement.ExpiresAt);
-    }
-
-    public async Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken)
-    {
-        var presented = await FindRefreshTokenAsync(refreshToken, cancellationToken);
-        if (presented is null)
-        {
-            return;
-        }
-
-        await refreshTokens.RevokeAsync(presented.AgencyId, presented.UserId, presented.Id, time.GetUtcNow(), cancellationToken);
-    }
-
-    public async Task<AuthResult> SwitchAgencyAsync(
-        SwitchAgencyRequest request, string? currentRefreshToken, CancellationToken cancellationToken)
+    public async Task<AuthResult> SwitchAgencyAsync(SwitchAgencyRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
 
@@ -201,19 +139,11 @@ public sealed class AuthService(
 
         var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
 
-        var now = time.GetUtcNow();
-        await memberships.TouchAsync(targetAgencyId, userId, now, cancellationToken);
+        await memberships.TouchAsync(targetAgencyId, userId, time.GetUtcNow(), cancellationToken);
 
-        // The browser keeps one refresh cookie. It is replaced below, so end the old agency's token
-        // instead of leaving it alive and unreachable. Only the caller's own token is touched.
-        var current = await FindRefreshTokenAsync(currentRefreshToken, cancellationToken);
-        if (current is not null && current.UserId == userId)
-        {
-            await refreshTokens.RevokeAsync(current.AgencyId, current.UserId, current.Id, now, cancellationToken);
-        }
-
+        // The browser keeps one token cookie. The one issued here replaces it.
         logger.LogInformation("User {UserId} switched to agency {AgencyId}", userId, targetAgencyId);
-        return await StartSessionAsync(userId, targetAgencyId, membership.Role, grants, cancellationToken);
+        return BuildResult(userId, targetAgencyId, membership.Role, grants);
     }
 
     public async Task<MeResponse> GetMeAsync(CancellationToken cancellationToken)
@@ -238,51 +168,12 @@ public sealed class AuthService(
             all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.BusinessModel, m.Role)).ToList());
     }
 
-    private async Task<AuthResult> StartSessionAsync(
-        Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants, CancellationToken cancellationToken)
-    {
-        var (rawToken, token) = NewRefreshToken(userId, agencyId, time.GetUtcNow());
-        await refreshTokens.InsertAsync(token, cancellationToken);
-        return BuildResult(userId, agencyId, role, grants, rawToken, token.ExpiresAt);
-    }
-
-    private (string Raw, NewRefreshToken Stored) NewRefreshToken(Guid userId, Guid agencyId, DateTimeOffset now)
-    {
-        // Only the hash is stored. The raw value exists here and in the cookie we send, nowhere else.
-        var raw = TokenGenerator.Create(TokenGenerator.DefaultByteLength);
-        var stored = new NewRefreshToken(
-            Guid.NewGuid(), agencyId, userId, HashHelper.Sha256Hex(raw), now.AddDays(jwtOptions.Value.RefreshTokenDays));
-        return (raw, stored);
-    }
-
-    // The one place a member's access token is made: register, login, refresh, switch-agency and
-    // Google all end here, each with the permissions its caller read for the member's role.
-    private AuthResult BuildResult(
-        Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants, string rawRefreshToken, DateTimeOffset refreshExpiresAt)
+    // The one place a member's access token is made: register, login, switch-agency and Google all
+    // end here, each with the permissions its caller read for the member's role. Nothing is stored:
+    // the token is the whole session.
+    private AuthResult BuildResult(Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants)
     {
         var access = accessTokens.Issue(userId, agencyId, role, grants);
-        var expiresIn = jwtOptions.Value.AccessTokenMinutes * 60;
-        return new AuthResult(new TokenResponse(access.Value, TokenResponse.BearerType, expiresIn), rawRefreshToken, refreshExpiresAt);
+        return new AuthResult(access.Value, access.ExpiresAt);
     }
-
-    private async Task<RefreshTokenRecord?> FindRefreshTokenAsync(string? refreshToken, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(refreshToken) || refreshToken.Length > MaxRefreshTokenLength)
-        {
-            return null;
-        }
-
-        return await refreshTokens.FindByHashAsync(HashHelper.Sha256Hex(refreshToken), cancellationToken);
-    }
-
-    private async Task RevokeAllAfterReuseAsync(RefreshTokenRecord presented, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var revoked = await refreshTokens.RevokeAllAsync(presented.AgencyId, presented.UserId, now, cancellationToken);
-        logger.LogWarning(
-            "A revoked refresh token was presented again for user {UserId} in agency {AgencyId}; revoked {Count} live tokens",
-            presented.UserId, presented.AgencyId, revoked);
-    }
-
-    private static UnauthorizedException InvalidRefreshToken() =>
-        new("Your session has expired. Sign in again.", "invalid_refresh_token");
 }

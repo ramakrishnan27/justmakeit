@@ -1,9 +1,7 @@
-using Platform.Auth.DTOs;
-
 namespace Platform.Auth.Models;
 
 /// <summary>
-/// What a sign-in produces. The access token goes in the response body; the refresh token goes only
-/// in the HttpOnly cookie, which is why it is kept apart from <see cref="TokenResponse"/>.
+/// What a sign-in produces: the signed access token and when it ends. The controller puts the token in the
+/// HttpOnly cookie and answers with the expiry only (see <c>SessionResponse</c>).
 /// </summary>
-public sealed record AuthResult(TokenResponse Tokens, string RefreshToken, DateTimeOffset RefreshTokenExpiresAt);
+public sealed record AuthResult(string AccessToken, DateTimeOffset ExpiresAt);

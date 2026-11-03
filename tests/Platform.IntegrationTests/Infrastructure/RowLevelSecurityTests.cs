@@ -3,7 +3,8 @@ using Npgsql;
 namespace Platform.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// Proves tenant isolation for every table in 001_init.sql. Rows are arranged as the database owner
+/// Proves tenant isolation for the tables of 001_init.sql that remain (the refresh token table was dropped by 006).
+/// Rows are arranged as the database owner
 /// (a superuser in the test container); everything under test runs as app_user, like the API.
 /// </summary>
 [Collection(PostgresCollection.Name)]
@@ -14,7 +15,6 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     private Guid _agencyA, _agencyB;
     private Guid _userA, _userB, _userBoth;
     private Guid _workspaceA, _workspaceB;
-    private Guid _tokenA, _tokenB;
 
     public async Task InitializeAsync()
     {
@@ -35,9 +35,6 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
 
         _workspaceA = await DbTestSupport.InsertWorkspaceAsync(owner, _agencyA, "Workspace A");
         _workspaceB = await DbTestSupport.InsertWorkspaceAsync(owner, _agencyB, "Workspace B");
-
-        _tokenA = await DbTestSupport.InsertRefreshTokenAsync(owner, _agencyA, _userA, "hash-a");
-        _tokenB = await DbTestSupport.InsertRefreshTokenAsync(owner, _agencyB, _userB, "hash-b");
     }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();
@@ -49,7 +46,6 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("users")]
     [InlineData("agency_members")]
     [InlineData("workspaces")]
-    [InlineData("refresh_tokens")]
     public async Task WithoutATenant_NoRowsAreVisible(string table)
     {
         await using var app = await _db.OpenAppAsync();
@@ -150,31 +146,6 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
         Assert.Equal(0, await DbTestSupport.CountAsync(app, "users"));
     }
 
-    [Fact]
-    public async Task RefreshTokens_ShowOnlyTheCallersOwnTokensInTheCurrentAgency()
-    {
-        await using var app = await _db.OpenAppAsync(_agencyA, _userA);
-
-        Assert.Equal(1, await DbTestSupport.CountAsync(app, "refresh_tokens"));
-        Assert.Equal(_tokenA, await DbTestSupport.ScalarAsync<Guid>(app, "SELECT id FROM refresh_tokens"));
-    }
-
-    [Fact]
-    public async Task RefreshTokens_AreHiddenWhenTheAgencyDoesNotMatch()
-    {
-        await using var app = await _db.OpenAppAsync(_agencyA, _userB); // userB's token belongs to agency B
-
-        Assert.Equal(0, await DbTestSupport.CountAsync(app, "refresh_tokens"));
-    }
-
-    [Fact]
-    public async Task RefreshTokens_AreHiddenWhenOnlyAnAgencyIsSet()
-    {
-        await using var app = await _db.OpenAppAsync(_agencyA, null);
-
-        Assert.Equal(0, await DbTestSupport.CountAsync(app, "refresh_tokens"));
-    }
-
     // --- Writes: another tenant's rows can be neither created, changed nor deleted ----------------
 
     [Theory]
@@ -182,8 +153,6 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES ('{B}', '{A_USER}', 'agency', 'organizationadmin')")]
     [InlineData("INSERT INTO agencies (id, name, business_model) VALUES (gen_random_uuid(), 'intruder', 'agency')")]
     [InlineData("INSERT INTO users (id, email, password_hash) VALUES (gen_random_uuid(), 'intruder@example.com', 'x')")]
-    [InlineData("INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ('{B}', '{A_USER}', 'x', now() + interval '1 day')")]
-    [InlineData("INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ('{A}', '{B_USER}', 'x', now() + interval '1 day')")]
     public async Task Insert_ForAnotherTenant_IsRejectedByRowLevelSecurity(string sqlTemplate)
     {
         await using var app = await _db.OpenAppAsync(_agencyA, _userA);
@@ -201,23 +170,20 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     [InlineData("UPDATE agencies SET name = 'hacked' WHERE id = '{B}'")]
     [InlineData("UPDATE agency_members SET role = 'organizationadmin' WHERE agency_id = '{B}'")]
     [InlineData("UPDATE users SET full_name = 'hacked' WHERE id = '{B_USER}'")]
-    [InlineData("UPDATE refresh_tokens SET revoked_at = now() WHERE id = '{B_TOKEN}'")]
     [InlineData("DELETE FROM workspaces WHERE id = '{B_WS}'")]
     [InlineData("DELETE FROM agencies WHERE id = '{B}'")]
     [InlineData("DELETE FROM agency_members WHERE agency_id = '{B}'")]
     [InlineData("DELETE FROM users WHERE id = '{B_USER}'")]
-    [InlineData("DELETE FROM refresh_tokens WHERE id = '{B_TOKEN}'")]
     public async Task UpdateOrDelete_OnAnotherTenantsRows_AffectsNothing(string sqlTemplate)
     {
         await using var app = await _db.OpenAppAsync(_agencyA, _userA);
         var sql = sqlTemplate
             .Replace("{B}", _agencyB.ToString()).Replace("{B_USER}", _userB.ToString())
-            .Replace("{B_WS}", _workspaceB.ToString()).Replace("{B_TOKEN}", _tokenB.ToString());
+            .Replace("{B_WS}", _workspaceB.ToString());
 
         Assert.Equal(0, await DbTestSupport.ExecuteAsync(app, sql));
 
         await using var owner = await _db.OpenOwnerAsync();
-        Assert.Equal(1, await DbTestSupport.CountAsync(owner, "refresh_tokens WHERE revoked_at IS NULL AND id = '" + _tokenB + "'"));
         Assert.Equal(1, await DbTestSupport.CountAsync(owner, "workspaces WHERE name = 'Workspace B'"));
         Assert.Equal(1, await DbTestSupport.CountAsync(owner, "agencies WHERE name = 'Agency B'"));
         Assert.Equal(2, await DbTestSupport.CountAsync(owner, "agency_members WHERE agency_id = '" + _agencyB + "'"));
@@ -248,7 +214,7 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
     }
 
     [Fact]
-    public async Task Registration_CanCreateAUserAgencyMembershipWorkspaceAndTokenBeforeAnyTenantExists()
+    public async Task Registration_CanCreateAUserAgencyMembershipAndWorkspaceBeforeAnyTenantExists()
     {
         // Registration picks the new ids first and opens the connection for them, so every policy passes.
         var agency = Guid.NewGuid();
@@ -260,14 +226,9 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
         await DbTestSupport.ExecuteAsync(app, "INSERT INTO agencies (id, name, business_model, plan) VALUES ($1, 'New agency', 'agency', 'trial')", agency);
         await DbTestSupport.ExecuteAsync(app, "INSERT INTO agency_members (agency_id, user_id, business_model, role) VALUES ($1, $2, 'agency', 'organizationadmin')", agency, user);
         await DbTestSupport.ExecuteAsync(app, "INSERT INTO workspaces (agency_id, name) VALUES ($1, 'First workspace')", agency);
-        await DbTestSupport.ExecuteAsync(
-            app,
-            "INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ($1, $2, 'new-hash', now() + interval '30 days')",
-            agency, user);
         await transaction.CommitAsync();
 
         Assert.Equal(1, await DbTestSupport.CountAsync(app, "workspaces"));
-        Assert.Equal(1, await DbTestSupport.CountAsync(app, "refresh_tokens"));
     }
 
     [Fact]
@@ -281,17 +242,5 @@ public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLife
             app, "INSERT INTO users (id, email, password_hash) VALUES ($1, 'A@EXAMPLE.COM', 'x')", user));
 
         Assert.Equal(PostgresErrorCodes.UniqueViolation, exception.SqlState);
-    }
-
-    [Fact]
-    public async Task Refresh_RotationAndRevocationWork_ForTheOwnerInTheirAgency()
-    {
-        await using var app = await _db.OpenAppAsync(_agencyA, _userA);
-
-        Assert.Equal(1, await DbTestSupport.ExecuteAsync(app, "UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1", _tokenA));
-        Assert.Equal(1, await DbTestSupport.ExecuteAsync(
-            app,
-            "INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ($1, $2, 'rotated', now() + interval '30 days')",
-            _agencyA, _userA));
     }
 }

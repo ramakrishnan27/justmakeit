@@ -168,25 +168,6 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SiteRefresh_WithoutACookie_IsRejectedByTheServiceNotTheAuthMiddleware()
-    {
-        var response = await _host.PostAsync("/v1/site/refresh");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal("invalid_refresh_token", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
-    }
-
-    [Fact]
-    public async Task SiteRefresh_ReadsOnlyItsOwnCookie_NotTheAgencyOne()
-    {
-        // An agency refresh cookie sent to the site endpoint is simply not the cookie it looks for.
-        var response = await _host.PostAsync("/v1/site/refresh", refreshCookie: "some-agency-token", cookieName: ApiTestHost.AgencyCookieName);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal("invalid_refresh_token", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
-    }
-
-    [Fact]
     public async Task SiteLogout_WithoutACookie_Succeeds_AndExpiresTheSiteCookieScopedToTheSitePath()
     {
         var response = await _host.PostAsync("/v1/site/logout");
@@ -199,12 +180,11 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
         Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response)); // the agency cookie is never touched
+        Assert.Null(ApiTestHost.MemberCookieHeader(response)); // the member cookie is never touched
     }
 
     [Theory]
     [InlineData("/v1/site/login")]
-    [InlineData("/v1/site/refresh")]
     [InlineData("/v1/site/logout")]
     public async Task EverySiteAuthResponse_IsMarkedNoStore(string path)
     {
@@ -242,34 +222,25 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Refresh_WithoutACookie_IsRejectedByTheServiceNotTheAuthMiddleware()
-    {
-        var response = await _host.PostAsync("/v1/auth/refresh");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal("invalid_refresh_token", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
-    }
-
-    [Fact]
     public async Task Logout_WithoutACookie_Succeeds_AndExpiresTheCookie()
     {
         var response = await _host.PostAsync("/v1/auth/logout");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        var cookie = ApiTestHost.RefreshCookieHeader(response);
+        var cookie = ApiTestHost.MemberCookieHeader(response);
         Assert.NotNull(cookie);
-        Assert.Contains("path=/v1/auth", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/v1;", cookie + ";", StringComparison.OrdinalIgnoreCase);
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(ApiTestHost.RefreshCookieValue(response));
+        Assert.Null(ApiTestHost.MemberCookieValue(response));
+        Assert.Null(ApiTestHost.SiteCookieHeader(response)); // the Site admin cookie is never touched
     }
 
     [Theory]
     [InlineData("/v1/auth/login")]
     [InlineData("/v1/auth/register")]
-    [InlineData("/v1/auth/refresh")]
     [InlineData("/v1/auth/logout")]
     public async Task EveryAuthResponse_IsMarkedNoStore(string path)
     {

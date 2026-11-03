@@ -10,8 +10,10 @@ using Platform.Auth.Settings;
 namespace Platform.Auth.Controllers;
 
 /// <summary>
-/// Sign-up, sign-in and session endpoints. Responses are marked no-store (errors too, by the exception
-/// middleware), and every route is rate limited: register and login tightly, the rest more loosely.
+/// Sign-up, sign-in and session endpoints. Signing in sets the access token as an HttpOnly cookie (see
+/// <see cref="AccessTokenCookie"/>) and answers with when it ends; there is no refresh, so an expired token means
+/// signing in again. Responses are marked no-store (errors too, by the exception middleware), and every route is
+/// rate limited: register and login tightly, the rest more loosely.
 /// </summary>
 [ApiController]
 [Route("v1/auth")]
@@ -28,7 +30,7 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     [HttpPost("register")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
@@ -39,53 +41,47 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
         return Issue(await auth.LoginAsync(request, cancellationToken), StatusCodes.Status200OK);
     }
 
-    /// <summary>Exchanges the refresh cookie for a new access token and a new refresh cookie.</summary>
-    [HttpPost("refresh")]
-    [AllowAnonymous]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Refresh(CancellationToken cancellationToken) =>
-        Issue(await auth.RefreshAsync(RefreshTokenCookie.Agency.Read(Request), cancellationToken), StatusCodes.Status200OK);
-
-    /// <summary>Revokes the refresh token and removes the cookie. Safe to call without a session.</summary>
+    /// <summary>
+    /// Signs out of this browser by removing the cookie. Safe to call without a session. Nothing is stored on the
+    /// server, so a copy of the token made earlier stays valid until it expires.
+    /// </summary>
     [HttpPost("logout")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
+    public IActionResult Logout()
     {
-        await auth.LogoutAsync(RefreshTokenCookie.Agency.Read(Request), cancellationToken);
-        RefreshTokenCookie.Agency.Clear(Response);
+        AccessTokenCookie.Member.Clear(Response);
         return NoContent();
     }
 
-    /// <summary>Issues tokens for another agency the signed-in user belongs to.</summary>
+    /// <summary>Issues a new token, and replaces the cookie, for another agency the signed-in user belongs to.</summary>
     [HttpPost("switch-agency")]
     [Authorize]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> SwitchAgency(SwitchAgencyRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
-        var result = await auth.SwitchAgencyAsync(request, RefreshTokenCookie.Agency.Read(Request), cancellationToken);
-        return Issue(result, StatusCodes.Status200OK);
+        return Issue(await auth.SwitchAgencyAsync(request, cancellationToken), StatusCodes.Status200OK);
     }
 
-    /// <summary>The signed-in user, the current agency and role, and every membership.</summary>
+    /// <summary>The signed-in user, the current agency and role, every membership, and when the sign-in ends.</summary>
     [HttpGet("me")]
     [Authorize]
     [ProducesResponseType<MeResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<MeResponse>> Me(CancellationToken cancellationToken) =>
-        await auth.GetMeAsync(cancellationToken);
+        (await auth.GetMeAsync(cancellationToken)) with { SessionExpiresAt = User.SessionExpiresAt() };
 
-    // The refresh token leaves only through the cookie; the body carries the access token alone.
+    // The token leaves only through the cookie; the body says when it ends.
     private ObjectResult Issue(AuthResult result, int statusCode)
     {
-        RefreshTokenCookie.Agency.Write(Response, result.RefreshToken, result.RefreshTokenExpiresAt);
-        return StatusCode(statusCode, result.Tokens);
+        AccessTokenCookie.Member.Write(Response, result.AccessToken, result.ExpiresAt);
+        return StatusCode(statusCode, new SessionResponse(result.ExpiresAt));
     }
 }

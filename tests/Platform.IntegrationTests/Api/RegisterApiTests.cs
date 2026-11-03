@@ -24,71 +24,66 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
         });
 
     [Fact]
-    public async Task Register_Returns201_WithAFifteenMinuteAccessToken_AndNoRefreshTokenInTheBody()
+    public async Task Register_Returns201_AndTheBodyOnlySaysWhenTheSignInEnds_NeverTheToken()
     {
         var response = await RegisterRawAsync("ana@example.com");
 
         AssertStatus(HttpStatusCode.Created, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
         var body = await ApiTestHost.ReadJsonAsync(response);
-        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("accessToken").GetString()));
-        Assert.Equal("Bearer", body.GetProperty("tokenType").GetString());
-        Assert.Equal(900, body.GetProperty("expiresIn").GetInt32());
-        Assert.DoesNotContain(body.EnumerateObject(), p => p.Name.Contains("refresh", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(["expiresAt"], body.EnumerateObject().Select(p => p.Name));
+        Assert.DoesNotContain(ApiTestHost.MemberCookieValue(response)!, body.ToString());
     }
 
     [Fact]
-    public async Task Register_AccessToken_IsHs256_FifteenMinutes_WithUserAgencyAndOrganizationAdminRole()
+    public async Task Register_AccessToken_IsHs256_ThirtyDays_WithUserAgencyAndOrganizationAdminRole()
     {
         var session = await Host.RegisterAsync();
 
         var token = new JsonWebToken(session.AccessToken);
 
         Assert.Equal("HS256", token.Alg);
-        Assert.Equal(TimeSpan.FromMinutes(15), token.ValidTo - token.ValidFrom);
+        Assert.Equal(TimeSpan.FromDays(30), token.ValidTo - token.ValidFrom);
         Assert.Equal(session.UserId.ToString(), token.GetClaim("user_id").Value);
         Assert.Equal(session.AgencyId.ToString(), token.GetClaim("agency_id").Value);
         Assert.Equal("organizationadmin", token.GetClaim("role").Value);
     }
 
     [Fact]
-    public async Task Register_SetsTheRefreshCookie_HttpOnly_Secure_SameSiteStrict_ScopedToAuth()
+    public async Task Register_SetsTheTokenCookie_HttpOnly_Secure_SameSiteStrict_ScopedToTheApi()
     {
         var response = await RegisterRawAsync("ana@example.com");
 
-        var cookie = ApiTestHost.RefreshCookieHeader(response);
+        var cookie = ApiTestHost.MemberCookieHeader(response);
         Assert.NotNull(cookie);
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("path=/v1/auth", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/v1;", cookie + ";", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task Register_RefreshCookie_Is32RandomBytes_ExpiringInThirtyDays_AndNotInTheBody()
+    public async Task Register_TokenCookie_IsASignedToken_ExpiringInThirtyDays_AndNotInTheBody()
     {
         var response = await RegisterRawAsync("ana@example.com");
 
-        var value = ApiTestHost.RefreshCookieValue(response)!;
-        Assert.Matches("^[A-Za-z0-9_-]{43}$", value);
+        var value = ApiTestHost.MemberCookieValue(response)!;
+        Assert.Equal(3, value.Split('.').Length); // header.payload.signature
         Assert.DoesNotContain(value, await response.Content.ReadAsStringAsync());
 
-        var expires = DateTimeOffset.Parse(
-            Regex.Match(ApiTestHost.RefreshCookieHeader(response)!, "expires=([^;]+)", RegexOptions.IgnoreCase).Groups[1].Value,
-            CultureInfo.InvariantCulture);
+        var expires = ApiTestHost.CookieExpires(response, ApiTestHost.MemberCookieName)!.Value;
         Assert.InRange((expires - DateTimeOffset.UtcNow).TotalDays, 29.9, 30.1);
+        Assert.Equal(new JsonWebToken(value).ValidTo.ToUniversalTime().Ticks / TimeSpan.TicksPerSecond, expires.UtcTicks / TimeSpan.TicksPerSecond);
     }
 
     [Fact]
-    public async Task Register_StoresOnlyTheSha256HashOfTheRefreshToken()
+    public async Task Register_StoresNothingForTheSession_BecauseTheTokenIsTheWholeSession()
     {
-        var session = await Host.RegisterAsync();
+        await RegisterRawAsync("ana@example.com");
 
-        var hashes = await OwnerQueryAsync<string>(
-            "SELECT token_hash FROM refresh_tokens WHERE user_id = @userId", new { userId = session.UserId });
-
-        Assert.Equal(HashHelper.Sha256Hex(session.RefreshToken), hashes);
-        Assert.NotEqual(session.RefreshToken, hashes);
+        // 006 removed the tables that held refresh tokens; no table keeps sessions.
+        Assert.Equal(0, await OwnerQueryAsync<long>(
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE '%refresh%'"));
     }
 
     [Fact]
@@ -178,9 +173,9 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
     public async Task Register_WithAWorkspaceName_NamesTheFirstWorkspaceAfterIt()
     {
         var response = await RegisterRawAsync("ana@example.com", workspaceName: "  Client one ");
-        var accessToken = (await ApiTestHost.ReadJsonAsync(response)).GetProperty("accessToken").GetString()!;
+        var accessToken = ApiTestHost.MemberCookieValue(response)!;
 
-        var workspaces = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/workspaces", accessToken));
+        var workspaces = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/workspaces", tokenCookie: accessToken));
 
         Assert.Equal(["Client one"], workspaces.EnumerateArray().Select(w => w.GetProperty("name").GetString()));
     }
@@ -205,7 +200,7 @@ public sealed class RegisterApiTests(PostgresFixture postgres) : AuthApiTestBase
 
         AssertStatus(HttpStatusCode.Conflict, response);
         Assert.Equal("email_taken", await CodeOfAsync(response));
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response));
+        Assert.Null(ApiTestHost.MemberCookieHeader(response));
         Assert.Equal(1, await OwnerQueryAsync<long>("SELECT count(*) FROM agencies"));
         Assert.Equal(1, await OwnerQueryAsync<long>("SELECT count(*) FROM users"));
         Assert.Equal(1, await OwnerQueryAsync<long>("SELECT count(*) FROM workspaces"));

@@ -186,10 +186,9 @@ public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBas
         await OwnerExecuteAsync("INSERT INTO workspaces (agency_id, name) VALUES (@id, 'Second client')", new { id = second });
 
         var inFirst = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/workspaces", registered.AccessToken));
-        var switched = await ApiTestHost.ReadJsonAsync(
-            await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken));
+        var switched = await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, tokenCookie: registered.AccessToken);
         var inSecond = await ApiTestHost.ReadJsonAsync(
-            await Host.GetAsync("/v1/workspaces", switched.GetProperty("accessToken").GetString()));
+            await Host.GetAsync("/v1/workspaces", tokenCookie: ApiTestHost.MemberCookieValue(switched)));
 
         Assert.Equal(["Main workspace", "First client"], NamesIn(inFirst));
         Assert.Equal(["Second client"], NamesIn(inSecond));

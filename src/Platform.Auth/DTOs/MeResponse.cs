@@ -20,4 +20,8 @@ public sealed record MeResponse(
     UserDto User,
     AgencyDto Agency,
     [property: JsonConverter(typeof(OrganizationRoleJsonConverter))] OrganizationRole Role,
-    IReadOnlyList<MembershipDto> Memberships);
+    IReadOnlyList<MembershipDto> Memberships)
+{
+    /// <summary>When the sign-in ends (the token's <c>exp</c>). Filled in by the controller, which can see the token.</summary>
+    public DateTimeOffset? SessionExpiresAt { get; init; }
+}

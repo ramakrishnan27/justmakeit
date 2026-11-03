@@ -7,20 +7,19 @@ using Platform.IntegrationTests.Infrastructure;
 
 namespace Platform.IntegrationTests.Api;
 
-/// <summary>A signed-in user as a test sees them: the credentials and the two tokens a login produced.</summary>
-public sealed record Session(
-    string Email, string Password, string AccessToken, string RefreshToken, Guid UserId, Guid AgencyId);
+/// <summary>A signed-in user as a test sees them: the credentials and the access token a login put in its cookie.</summary>
+public sealed record Session(string Email, string Password, string AccessToken, Guid UserId, Guid AgencyId);
 
 /// <summary>
-/// The API hosted in memory, with a client that does no cookie handling of its own: the refresh
-/// cookie is Secure and scoped to /v1/auth, so a test reads and sends it by hand, which also lets it
-/// replay an old one.
+/// The API hosted in memory, with a client that does no cookie handling of its own: the access token
+/// cookie is Secure and scoped to a path, so a test reads and sends it by hand. A test may also send the
+/// same token as an <c>Authorization: Bearer</c> header, which the API still accepts.
 /// </summary>
 public sealed class ApiTestHost : IAsyncDisposable
 {
     public const string DefaultPassword = "a long enough password";
-    public const string AgencyCookieName = "refresh_token";
-    public const string SiteCookieName = "site_refresh_token";
+    public const string MemberCookieName = "access_token";
+    public const string SiteCookieName = "site_access_token";
 
     private readonly TestDatabase? _database;
     private int _counter;
@@ -74,18 +73,34 @@ public sealed class ApiTestHost : IAsyncDisposable
         }
     }
 
-    public Task<HttpResponseMessage> GetAsync(string path, string? accessToken = null, string? remoteIp = null) =>
-        SendAsync(HttpMethod.Get, path, null, accessToken, null, remoteIp);
+    /// <param name="accessToken">Sent as an <c>Authorization: Bearer</c> header.</param>
+    /// <param name="tokenCookie">Sent as the access token cookie named <paramref name="cookieName"/>, the way a browser carries it.</param>
+    /// <param name="cookieName">The cookie to send <paramref name="tokenCookie"/> as: the member one by default, or <see cref="SiteCookieName"/>.</param>
+    public Task<HttpResponseMessage> GetAsync(
+        string path,
+        string? accessToken = null,
+        string? remoteIp = null,
+        string? tokenCookie = null,
+        string cookieName = MemberCookieName) =>
+        SendAsync(HttpMethod.Get, path, null, accessToken, tokenCookie, remoteIp, cookieName);
 
-    /// <param name="cookieName">The cookie to send <paramref name="refreshCookie"/> as: the agency one by default, or <see cref="SiteCookieName"/>.</param>
+    /// <param name="cookieName">The cookie to send <paramref name="tokenCookie"/> as: the member one by default, or <see cref="SiteCookieName"/>.</param>
     public Task<HttpResponseMessage> PostAsync(
         string path,
         object? body = null,
         string? accessToken = null,
-        string? refreshCookie = null,
+        string? tokenCookie = null,
         string? remoteIp = null,
-        string cookieName = AgencyCookieName) =>
-        SendAsync(HttpMethod.Post, path, body, accessToken, refreshCookie, remoteIp, cookieName);
+        string cookieName = MemberCookieName) =>
+        SendAsync(HttpMethod.Post, path, body, accessToken, tokenCookie, remoteIp, cookieName);
+
+    /// <summary>A GET that carries several cookies at once, the way a browser sends both sessions' cookies to /v1/site.</summary>
+    public async Task<HttpResponseMessage> GetWithCookiesAsync(string path, params (string Name, string Value)[] cookies)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("Cookie", string.Join("; ", cookies.Select(cookie => $"{cookie.Name}={cookie.Value}")));
+        return await Client.SendAsync(request);
+    }
 
     public Task<HttpResponseMessage> PutAsync(string path, object? body = null, string? accessToken = null) =>
         SendAsync(HttpMethod.Put, path, body, accessToken, null, null);
@@ -98,9 +113,9 @@ public sealed class ApiTestHost : IAsyncDisposable
         string path,
         object? body,
         string? accessToken,
-        string? refreshCookie,
+        string? tokenCookie,
         string? remoteIp,
-        string cookieName = AgencyCookieName)
+        string cookieName = MemberCookieName)
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
@@ -113,9 +128,9 @@ public sealed class ApiTestHost : IAsyncDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         }
 
-        if (refreshCookie is not null)
+        if (tokenCookie is not null)
         {
-            request.Headers.Add("Cookie", $"{cookieName}={refreshCookie}");
+            request.Headers.Add("Cookie", $"{cookieName}={tokenCookie}");
         }
 
         if (remoteIp is not null)
@@ -150,15 +165,14 @@ public sealed class ApiTestHost : IAsyncDisposable
 
     private async Task<Session> ToSessionAsync(HttpResponseMessage response, string email, string password)
     {
-        var accessToken = (await ReadJsonAsync(response)).GetProperty("accessToken").GetString()!;
-        var refreshToken = RefreshCookieValue(response)!;
+        // The token is in the cookie, never in the body.
+        var accessToken = MemberCookieValue(response)!;
 
-        var me = await ReadJsonAsync(await GetAsync("/v1/auth/me", accessToken));
+        var me = await ReadJsonAsync(await GetAsync("/v1/auth/me", tokenCookie: accessToken));
         return new Session(
             email,
             password,
             accessToken,
-            refreshToken,
             me.GetProperty("user").GetProperty("id").GetGuid(),
             me.GetProperty("agency").GetProperty("id").GetGuid());
     }
@@ -169,16 +183,16 @@ public sealed class ApiTestHost : IAsyncDisposable
         return document.RootElement.Clone();
     }
 
-    /// <summary>The raw Set-Cookie header for the agency refresh token, or null when the response sets none.</summary>
-    public static string? RefreshCookieHeader(HttpResponseMessage response) => CookieHeader(response, AgencyCookieName);
+    /// <summary>The raw Set-Cookie header for the member access token, or null when the response sets none.</summary>
+    public static string? MemberCookieHeader(HttpResponseMessage response) => CookieHeader(response, MemberCookieName);
 
-    /// <summary>The agency refresh token value the response put in its cookie, or null when there is none.</summary>
-    public static string? RefreshCookieValue(HttpResponseMessage response) => CookieValue(response, AgencyCookieName);
+    /// <summary>The member access token the response put in its cookie, or null when there is none or it was cleared.</summary>
+    public static string? MemberCookieValue(HttpResponseMessage response) => CookieValue(response, MemberCookieName);
 
-    /// <summary>The raw Set-Cookie header for the site admin refresh token, or null when the response sets none.</summary>
+    /// <summary>The raw Set-Cookie header for the site admin access token, or null when the response sets none.</summary>
     public static string? SiteCookieHeader(HttpResponseMessage response) => CookieHeader(response, SiteCookieName);
 
-    /// <summary>The site admin refresh token value the response put in its cookie, or null when there is none.</summary>
+    /// <summary>The site admin access token the response put in its cookie, or null when there is none or it was cleared.</summary>
     public static string? SiteCookieValue(HttpResponseMessage response) => CookieValue(response, SiteCookieName);
 
     /// <summary>The raw Set-Cookie header for any cookie by name, or null when the response sets none.</summary>
@@ -186,6 +200,19 @@ public sealed class ApiTestHost : IAsyncDisposable
         response.Headers.TryGetValues("Set-Cookie", out var values)
             ? values.FirstOrDefault(value => value.StartsWith(name + "=", StringComparison.Ordinal))
             : null;
+
+    /// <summary>When the cookie the response sets expires (its <c>Expires</c> attribute), or null when it has none.</summary>
+    public static DateTimeOffset? CookieExpires(HttpResponseMessage response, string name)
+    {
+        var attribute = CookieHeader(response, name)?
+            .Split(';')
+            .Select(part => part.Trim())
+            .FirstOrDefault(part => part.StartsWith("expires=", StringComparison.OrdinalIgnoreCase));
+        return attribute is null
+            ? null
+            : DateTimeOffset.Parse(
+                attribute["expires=".Length..], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
+    }
 
     /// <summary>The value of any cookie the response sets, or null when there is none or it was cleared.</summary>
     public static string? CookieValue(HttpResponseMessage response, string name)

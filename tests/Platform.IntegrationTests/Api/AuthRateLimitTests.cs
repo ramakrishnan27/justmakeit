@@ -19,8 +19,9 @@ public sealed class AuthRateLimitTests
     private static Task<HttpResponseMessage> BadLogin(ApiTestHost host, string? ip = null) =>
         host.PostAsync("/v1/auth/login", new { email = "", password = "" }, remoteIp: ip);
 
-    private static Task<HttpResponseMessage> RefreshWithoutCookie(ApiTestHost host, string? ip = null) =>
-        host.PostAsync("/v1/auth/refresh", remoteIp: ip);
+    // Logout is a session endpoint that is answered (204) without touching a database, so it counts against the session budget.
+    private static Task<HttpResponseMessage> LogoutWithoutSession(ApiTestHost host, string? ip = null) =>
+        host.PostAsync("/v1/auth/logout", remoteIp: ip);
 
     [Fact]
     public async Task Login_IsAnsweredNormallyUpToTheLimit_ThenRejectedWith429()
@@ -84,11 +85,11 @@ public sealed class AuthRateLimitTests
     {
         await using var host = StartHost(session: 3);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await RefreshWithoutCookie(host)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await host.PostAsync("/v1/site/refresh")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await LogoutWithoutSession(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await host.PostAsync("/v1/site/logout")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await host.GetAsync("/v1/site/me")).StatusCode);
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.PostAsync("/v1/site/refresh")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.PostAsync("/v1/site/logout")).StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await host.GetAsync("/v1/site/overview", host.Factory.CreateSiteAdminAccessToken(Guid.NewGuid()))).StatusCode);
     }
 
@@ -106,18 +107,18 @@ public sealed class AuthRateLimitTests
     }
 
     [Theory]
-    [InlineData("refresh")]
-    [InlineData("me")]
-    public async Task SessionEndpoints_HaveTheirOwnLimit(string endpoint)
+    [InlineData("logout", HttpStatusCode.NoContent)]
+    [InlineData("me", HttpStatusCode.Unauthorized)]
+    public async Task SessionEndpoints_HaveTheirOwnLimit(string endpoint, HttpStatusCode answered)
     {
         await using var host = StartHost(session: 2);
 
-        Task<HttpResponseMessage> Call() => endpoint == "refresh"
-            ? RefreshWithoutCookie(host)
+        Task<HttpResponseMessage> Call() => endpoint == "logout"
+            ? LogoutWithoutSession(host)
             : host.GetAsync("/v1/auth/me");
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Call()).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Call()).StatusCode);
+        Assert.Equal(answered, (await Call()).StatusCode);
+        Assert.Equal(answered, (await Call()).StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await Call()).StatusCode);
     }
 
@@ -137,8 +138,8 @@ public sealed class AuthRateLimitTests
 
         await BadLogin(host);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await BadLogin(host)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await RefreshWithoutCookie(host)).StatusCode);
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await RefreshWithoutCookie(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await LogoutWithoutSession(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await LogoutWithoutSession(host)).StatusCode);
     }
 
     [Fact]

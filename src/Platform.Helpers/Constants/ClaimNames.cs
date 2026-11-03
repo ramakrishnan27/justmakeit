@@ -11,7 +11,7 @@ public static class ClaimNames
 
     /// <summary>
     /// The permission version the token was issued under. When the Site admin changes any grant the
-    /// version goes up and a token carrying an older one is answered 401, so it is refreshed.
+    /// version goes up and a token carrying an older one is answered 401 <c>permissions_changed</c>: the person signs in again.
     /// </summary>
     public const string PermissionVersion = "pv";
 }

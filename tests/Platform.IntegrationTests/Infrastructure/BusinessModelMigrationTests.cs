@@ -337,10 +337,10 @@ public sealed class BusinessModelMigrationTests(PostgresFixture postgres) : IAsy
         var tables = (await owner.QueryAsync<(string Name, bool Enabled, bool Forced)>(
             """
             SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-            WHERE relname IN ('agencies', 'agency_members', 'workspaces', 'users', 'refresh_tokens') ORDER BY relname
+            WHERE relname IN ('agencies', 'agency_members', 'workspaces', 'users') ORDER BY relname
             """)).ToList();
 
-        Assert.Equal(5, tables.Count);
+        Assert.Equal(4, tables.Count);
         Assert.All(tables, t => Assert.True(t.Enabled && t.Forced, $"{t.Name} must keep row-level security enabled and forced."));
         Assert.Equal(0, await DbTestSupport.CountAsync(owner, "pg_policies WHERE policyname = 'owner_migrate'"));
     }

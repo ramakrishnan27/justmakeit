@@ -67,23 +67,23 @@ public sealed class JwtAccessTokenIssuerTests
     }
 
     [Fact]
-    public void Issue_ExpiresAfterTheConfiguredMinutes_FifteenByDefault()
+    public void Issue_ExpiresAfterTheConfiguredDays_ThirtyByDefault()
     {
         var token = CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants);
 
-        Assert.Equal(15, new JwtSettings().AccessTokenMinutes);
-        Assert.Equal(_time.Now.AddMinutes(15), token.ExpiresAt);
+        Assert.Equal(30, new JwtSettings().AccessTokenDays);
+        Assert.Equal(_time.Now.AddDays(30), token.ExpiresAt);
         Assert.Equal(
-            _time.Now.AddMinutes(15).ToUnixTimeSeconds(),
+            _time.Now.AddDays(30).ToUnixTimeSeconds(),
             new DateTimeOffset(new JsonWebToken(token.Value).ValidTo, TimeSpan.Zero).ToUnixTimeSeconds());
     }
 
     [Fact]
     public void Issue_HonoursACustomLifetime()
     {
-        _settings.AccessTokenMinutes = 5;
+        _settings.AccessTokenDays = 5;
 
-        Assert.Equal(_time.Now.AddMinutes(5), CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).ExpiresAt);
+        Assert.Equal(_time.Now.AddDays(5), CreateIssuer().Issue(_userId, _agencyId, OrganizationRole.OrganizationAdmin, Grants).ExpiresAt);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class JwtAccessTokenIssuerTests
     }
 
     [Fact]
-    public async Task IssueSiteAdmin_ProducesATokenTheApiAccepts_SignedWithHs256_ForFifteenMinutes()
+    public async Task IssueSiteAdmin_ProducesATokenTheApiAccepts_SignedWithHs256_ForTheSameLifetime()
     {
         var issued = CreateIssuer().IssueSiteAdmin(_userId);
 
@@ -179,7 +179,7 @@ public sealed class JwtAccessTokenIssuerTests
 
         Assert.True(result.IsValid, result.Exception?.Message);
         Assert.Equal("HS256", new JsonWebToken(issued.Value).Alg);
-        Assert.Equal(_time.Now.AddMinutes(15), issued.ExpiresAt);
+        Assert.Equal(_time.Now.AddDays(30), issued.ExpiresAt);
     }
 
     [Fact]

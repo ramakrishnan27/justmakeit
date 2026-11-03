@@ -22,12 +22,12 @@ function useServices(): AppServices {
   return services;
 }
 
-/** The API client. Pages call the API through it, so the access token and the single refresh stay in one place. */
+/** The API client. Pages call the API through it, so the one place that calls fetch (and sees a 401) stays one. */
 export function useApi(): ApiClient {
   return useServices().api;
 }
 
-/** What the session can do: sign in, sign out, read the claims. The object never changes, so it is safe in effects. */
+/** What the session can do: sign in, sign up, sign out. The object never changes, so it is safe in effects. */
 export function useSessionActions(): Session {
   return useServices().session;
 }

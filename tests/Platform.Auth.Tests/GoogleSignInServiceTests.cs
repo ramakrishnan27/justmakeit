@@ -31,7 +31,7 @@ public sealed class GoogleSignInServiceTests
     private readonly GoogleSettings _settings = new() { ClientId = ClientId, ClientSecret = "the-client-secret" };
     private readonly GoogleSignInService _service;
 
-    private static readonly AuthResult Session = new(new TokenResponse("access-token", "Bearer", 900), "refresh-token", new DateTimeOffset(2026, 11, 30, 0, 0, 0, TimeSpan.Zero));
+    private static readonly AuthResult Session = new("access-token", new DateTimeOffset(2026, 11, 30, 0, 0, 0, TimeSpan.Zero));
     private static readonly GoogleIdentity Maya = new("sub-maya", "Maya.Rao@Gmail.com", true, "Maya Rao");
 
     public GoogleSignInServiceTests()

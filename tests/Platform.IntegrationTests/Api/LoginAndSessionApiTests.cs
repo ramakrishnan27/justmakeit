@@ -13,7 +13,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     // --- Login -------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Login_WithTheRightPassword_ReturnsATokenAndANewRefreshCookie()
+    public async Task Login_WithTheRightPassword_SetsTheTokenCookie_AndTheBodyOnlySaysWhenItEnds()
     {
         var registered = await Host.RegisterAsync();
 
@@ -22,22 +22,38 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         AssertStatus(HttpStatusCode.OK, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
         var body = await ApiTestHost.ReadJsonAsync(response);
-        Assert.Equal("Bearer", body.GetProperty("tokenType").GetString());
-        Assert.Equal(900, body.GetProperty("expiresIn").GetInt32());
-        Assert.DoesNotContain(body.EnumerateObject(), p => p.Name.Contains("refresh", StringComparison.OrdinalIgnoreCase));
-        Assert.NotEqual(registered.RefreshToken, ApiTestHost.RefreshCookieValue(response));
-        var cookie = ApiTestHost.RefreshCookieHeader(response)!;
+        // Scripts on the page must never be able to read the token: it is in the cookie and nowhere in the body.
+        Assert.Equal(["expiresAt"], body.EnumerateObject().Select(p => p.Name));
+        Assert.DoesNotContain(registered.AccessToken, body.ToString());
+        Assert.NotEqual(registered.AccessToken, ApiTestHost.MemberCookieValue(response));
+        var cookie = ApiTestHost.MemberCookieHeader(response)!;
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/v1;", cookie + ";", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task Login_ReturnsATokenThatWorksOnProtectedEndpoints()
+    public async Task Login_TheCookieAndTheBodyEndTogether_ThirtyDaysFromNow()
+    {
+        var registered = await Host.RegisterAsync();
+
+        var response = await LoginRawAsync(registered.Email);
+
+        var expires = ApiTestHost.CookieExpires(response, ApiTestHost.MemberCookieName)!.Value;
+        Assert.InRange(expires, DateTimeOffset.UtcNow.AddDays(30).AddMinutes(-2), DateTimeOffset.UtcNow.AddDays(30).AddMinutes(2));
+        var endsAt = (await ApiTestHost.ReadJsonAsync(response)).GetProperty("expiresAt").GetDateTimeOffset();
+        Assert.InRange((endsAt - expires).TotalSeconds, -1, 1);
+    }
+
+    [Fact]
+    public async Task Login_ReturnsATokenThatWorksOnProtectedEndpoints_AsACookieOrAsABearerHeader()
     {
         var registered = await Host.RegisterAsync();
 
         var session = await Host.LoginAsync(registered.Email);
 
+        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", tokenCookie: session.AccessToken));
         AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", session.AccessToken));
         Assert.Equal(registered.AgencyId, session.AgencyId);
     }
@@ -51,7 +67,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
 
         AssertStatus(HttpStatusCode.Unauthorized, response);
         Assert.Equal("invalid_credentials", await CodeOfAsync(response));
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response));
+        Assert.Null(ApiTestHost.MemberCookieHeader(response));
     }
 
     [Fact]
@@ -80,7 +96,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         var session = await Host.LoginAsync(registered.Email);
 
         Assert.Equal(second, session.AgencyId);
-        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", session.AccessToken));
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", tokenCookie: session.AccessToken));
         Assert.Equal("clientmanager", me.GetProperty("role").GetString());
         Assert.Equal("Second agency", me.GetProperty("agency").GetProperty("name").GetString());
     }
@@ -113,7 +129,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
 
         AssertStatus(HttpStatusCode.Forbidden, response);
         Assert.Equal("not_a_member", await CodeOfAsync(response));
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response));
+        Assert.Null(ApiTestHost.MemberCookieHeader(response));
     }
 
     [Fact]
@@ -136,7 +152,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         var registered = await Host.RegisterAsync(agencyName: "First agency");
         var second = await AddMembershipAsync(registered, "marketingmanager", "Second agency");
 
-        var response = await Host.GetAsync("/v1/auth/me", registered.AccessToken);
+        var response = await Host.GetAsync("/v1/auth/me", tokenCookie: registered.AccessToken);
 
         AssertStatus(HttpStatusCode.OK, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
@@ -156,13 +172,27 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     }
 
     [Fact]
+    public async Task Me_SaysWhenTheSignInEnds_WhichIsTheTokensOwnExpiry()
+    {
+        var login = await LoginRawAsync((await Host.RegisterAsync()).Email);
+        var token = ApiTestHost.MemberCookieValue(login)!;
+
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", tokenCookie: token));
+
+        var endsAt = me.GetProperty("sessionExpiresAt").GetDateTimeOffset();
+        Assert.InRange(endsAt, DateTimeOffset.UtcNow.AddDays(30).AddMinutes(-2), DateTimeOffset.UtcNow.AddDays(30).AddMinutes(2));
+        var cookieEnds = ApiTestHost.CookieExpires(login, ApiTestHost.MemberCookieName)!.Value;
+        Assert.InRange((endsAt - cookieEnds).TotalSeconds, -1, 1);
+    }
+
+    [Fact]
     public async Task Me_NeverShowsAnotherUsersMemberships()
     {
         var ana = await Host.RegisterAsync();
         var bob = await Host.RegisterAsync(agencyName: "Bob only");
         await AddMembershipAsync(bob, "clientmanager", "Bob's second");
 
-        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", ana.AccessToken));
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", tokenCookie: ana.AccessToken));
 
         Assert.Single(me.GetProperty("memberships").EnumerateArray());
         Assert.DoesNotContain("Bob", me.ToString());
@@ -175,7 +205,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         await OwnerExecuteAsync(
             "UPDATE agency_members SET role = 'clientmanager' WHERE user_id = @userId", new { userId = registered.UserId });
 
-        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", registered.AccessToken));
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", tokenCookie: registered.AccessToken));
 
         Assert.Equal("clientmanager", me.GetProperty("role").GetString());
     }
@@ -186,7 +216,7 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         var registered = await Host.RegisterAsync();
         await OwnerExecuteAsync("DELETE FROM agency_members WHERE user_id = @userId", new { userId = registered.UserId });
 
-        var response = await Host.GetAsync("/v1/auth/me", registered.AccessToken);
+        var response = await Host.GetAsync("/v1/auth/me", tokenCookie: registered.AccessToken);
 
         AssertStatus(HttpStatusCode.Unauthorized, response);
         Assert.Equal("membership_ended", await CodeOfAsync(response));
@@ -195,85 +225,63 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     // --- Logout ------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Logout_Returns204_ExpiresTheCookie_AndEndsTheSession()
+    public async Task Logout_Returns204_AndExpiresTheCookieAtTheSamePathItWasSetAt()
     {
         var registered = await Host.RegisterAsync();
 
-        var response = await Host.PostAsync("/v1/auth/logout", refreshCookie: registered.RefreshToken);
+        var response = await Host.PostAsync("/v1/auth/logout", tokenCookie: registered.AccessToken);
 
         AssertStatus(HttpStatusCode.NoContent, response);
-        var cookie = ApiTestHost.RefreshCookieHeader(response)!;
+        var cookie = ApiTestHost.MemberCookieHeader(response)!;
         Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("path=/v1/auth", cookie, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, await OwnerQueryAsync<long>(
-            "SELECT count(*) FROM refresh_tokens WHERE user_id = @userId AND revoked_at IS NULL", new { userId = registered.UserId }));
-        AssertStatus(HttpStatusCode.Unauthorized, await Host.PostAsync("/v1/auth/refresh", refreshCookie: registered.RefreshToken));
+        Assert.Contains("path=/v1;", cookie + ";", StringComparison.OrdinalIgnoreCase);
+        Assert.Null(ApiTestHost.MemberCookieValue(response));
     }
 
     [Fact]
-    public async Task Logout_EndsOnlyTheSessionItWasGiven()
+    public async Task Logout_OnlyClearsTheBrowsersCookie_ATokenThatWasCopiedStaysValidUntilItExpires()
     {
+        // Nothing is stored for a session, so there is nothing to revoke. This test records that on purpose: it is the
+        // price of having no refresh token, and a member-removal feature will need its own way to end sessions.
         var registered = await Host.RegisterAsync();
-        var otherDevice = await Host.LoginAsync(registered.Email);
 
-        await Host.PostAsync("/v1/auth/logout", refreshCookie: registered.RefreshToken);
+        await Host.PostAsync("/v1/auth/logout", tokenCookie: registered.AccessToken);
 
-        AssertStatus(HttpStatusCode.OK, await Host.PostAsync("/v1/auth/refresh", refreshCookie: otherDevice.RefreshToken));
+        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/auth/me", tokenCookie: registered.AccessToken));
+    }
+
+    [Fact]
+    public async Task Logout_WithNoSessionAtAll_StillSucceeds()
+    {
+        AssertStatus(HttpStatusCode.NoContent, await Host.PostAsync("/v1/auth/logout"));
     }
 
     [Fact]
     public async Task Logout_WithAnUnknownCookie_StillSucceeds()
     {
-        var response = await Host.PostAsync("/v1/auth/logout", refreshCookie: "not-a-token-we-issued");
+        var response = await Host.PostAsync("/v1/auth/logout", tokenCookie: "not-a-token-we-issued");
 
         AssertStatus(HttpStatusCode.NoContent, response);
-    }
-
-    [Fact]
-    public async Task Logout_CannotEndAnotherUsersSession_WithoutHavingTheirCookie()
-    {
-        var ana = await Host.RegisterAsync();
-        var bob = await Host.RegisterAsync();
-
-        await Host.PostAsync("/v1/auth/logout", refreshCookie: "guess", accessToken: ana.AccessToken);
-
-        AssertStatus(HttpStatusCode.OK, await Host.PostAsync("/v1/auth/refresh", refreshCookie: bob.RefreshToken));
     }
 
     // --- Switch agency -----------------------------------------------------------------------
 
     [Fact]
-    public async Task SwitchAgency_IssuesTokensForTheOtherAgency_WithThatRole()
+    public async Task SwitchAgency_SetsANewCookieForTheOtherAgency_WithThatRole()
     {
         var registered = await Host.RegisterAsync(agencyName: "First agency");
         var second = await AddMembershipAsync(registered, "clientmanager", "Second agency");
 
-        var response = await Host.PostAsync(
-            "/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
+        var response = await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, tokenCookie: registered.AccessToken);
 
         AssertStatus(HttpStatusCode.OK, response);
         Assert.True(response.Headers.CacheControl?.NoStore);
-        var body = await ApiTestHost.ReadJsonAsync(response);
-        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", body.GetProperty("accessToken").GetString()));
+        Assert.Equal(["expiresAt"], (await ApiTestHost.ReadJsonAsync(response)).EnumerateObject().Select(p => p.Name));
+        var newToken = ApiTestHost.MemberCookieValue(response)!;
+        Assert.NotEqual(registered.AccessToken, newToken);
+        var me = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/auth/me", tokenCookie: newToken));
         Assert.Equal(second, me.GetProperty("agency").GetProperty("id").GetGuid());
         Assert.Equal("clientmanager", me.GetProperty("role").GetString());
-        Assert.NotEqual(registered.RefreshToken, ApiTestHost.RefreshCookieValue(response));
-    }
-
-    [Fact]
-    public async Task SwitchAgency_ReplacesTheRefreshCookie_AndEndsTheOldAgencysToken()
-    {
-        var registered = await Host.RegisterAsync();
-        var second = await AddMembershipAsync(registered, "marketingmanager");
-
-        var response = await Host.PostAsync(
-            "/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
-
-        var newCookie = ApiTestHost.RefreshCookieValue(response)!;
-        AssertStatus(HttpStatusCode.OK, await Host.PostAsync("/v1/auth/refresh", refreshCookie: newCookie));
-        Assert.Equal(1, await OwnerQueryAsync<long>(
-            "SELECT count(*) FROM refresh_tokens WHERE user_id = @userId AND agency_id = @agencyId AND revoked_at IS NOT NULL",
-            new { userId = registered.UserId, agencyId = registered.AgencyId }));
     }
 
     [Fact]
@@ -282,24 +290,22 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
         var registered = await Host.RegisterAsync();
         var second = await AddMembershipAsync(registered, "marketingmanager", lastActiveAt: DateTimeOffset.UtcNow.AddDays(-30));
 
-        await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, registered.AccessToken, registered.RefreshToken);
+        await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, tokenCookie: registered.AccessToken);
 
         Assert.Equal(second, (await Host.LoginAsync(registered.Email)).AgencyId);
     }
 
     [Fact]
-    public async Task SwitchAgency_ToAnAgencyTheUserIsNotIn_Returns403_AndChangesNothing()
+    public async Task SwitchAgency_ToAnAgencyTheUserIsNotIn_Returns403_AndSetsNoCookie()
     {
         var ana = await Host.RegisterAsync();
         var bob = await Host.RegisterAsync();
 
-        var response = await Host.PostAsync(
-            "/v1/auth/switch-agency", new { agencyId = bob.AgencyId }, ana.AccessToken, ana.RefreshToken);
+        var response = await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = bob.AgencyId }, tokenCookie: ana.AccessToken);
 
         AssertStatus(HttpStatusCode.Forbidden, response);
         Assert.Equal("not_a_member", await CodeOfAsync(response));
-        Assert.Null(ApiTestHost.RefreshCookieHeader(response));
-        AssertStatus(HttpStatusCode.OK, await Host.PostAsync("/v1/auth/refresh", refreshCookie: ana.RefreshToken));
+        Assert.Null(ApiTestHost.MemberCookieHeader(response));
     }
 
     [Fact]
@@ -324,15 +330,10 @@ public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiT
     }
 
     [Fact]
-    public async Task SwitchAgency_NeverEndsAnotherUsersRefreshToken()
+    public async Task SwitchAgency_WithoutASession_Returns401()
     {
-        var ana = await Host.RegisterAsync();
-        var bob = await Host.RegisterAsync();
-        var second = await AddMembershipAsync(ana, "clientmanager");
+        var response = await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = Guid.NewGuid() });
 
-        // Ana presents Bob's cookie by mistake or on purpose: it is not hers, so it is left alone.
-        await Host.PostAsync("/v1/auth/switch-agency", new { agencyId = second }, ana.AccessToken, bob.RefreshToken);
-
-        AssertStatus(HttpStatusCode.OK, await Host.PostAsync("/v1/auth/refresh", refreshCookie: bob.RefreshToken));
+        AssertStatus(HttpStatusCode.Unauthorized, response);
     }
 }

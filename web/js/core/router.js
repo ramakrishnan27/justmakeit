@@ -147,7 +147,7 @@ export function createRouter({ win, session, render, app = adminApp }) {
       return;
     }
 
-    // A change of permissions (after a token renewal) matters only when it changes what this very address shows: a
+    // A change of permissions (the menu was read again) matters only when it changes what this very address shows: a
     // page the person just lost becomes "no access", one they just gained opens. Otherwise the page is left alone,
     // so nothing they are typing is thrown away.
     const key = permissionsKey(state.permissions);

@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { memberServer, renderApp, type MemberOptions } from '@/test/renderApp';
+import { formatDate } from '@/lib/format';
+import { memberServer, renderApp, sessionEndsAt, type MemberOptions } from '@/test/renderApp';
 
 const open = (options: MemberOptions = {}) => renderApp('/dashboard', memberServer(options));
 const section = (name: string) => screen.getByRole('region', { name });
@@ -57,5 +58,16 @@ describe('the dashboard', () => {
     expect(session.getByText('u2')).toBeTruthy();
     expect(session.getByText('marketingmanager')).toBeTruthy();
     expect(session.getByText('Trial')).toBeTruthy();
+  });
+
+  it('says until when the sign-in lasts, and that it is not renewed', async () => {
+    await open();
+    await screen.findByRole('heading', { level: 1 });
+
+    const session = within(section('Your session'));
+    expect(session.getByText('Signed in until')).toBeTruthy();
+    expect(session.getByText(formatDate(sessionEndsAt, { withTime: true }))).toBeTruthy();
+    expect(session.getByText(/not renewed/)).toBeTruthy();
+    expect(session.queryByText(/Token expires/)).toBeNull();
   });
 });

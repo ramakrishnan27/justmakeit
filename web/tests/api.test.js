@@ -3,100 +3,10 @@ import { describe, it } from 'node:test';
 import { ApiError, createApiClient } from '../js/core/api.js';
 import { fakeFetch, jsonResponse, routedFetch } from './helpers.js';
 
-const authorizationOf = (call) => call.headers.Authorization;
-
-describe('api client: renewed tokens', () => {
-  it('tells listeners when a refresh gives it a new token, whoever asked for it', async () => {
-    const fetchFn = routedFetch({
-      'GET /v1/data': (call) => (authorizationOf(call) === 'Bearer new-token' ? jsonResponse(200, {}) : jsonResponse(401, {})),
-      // A new response each time: a body can be read once.
-      'POST /v1/site/refresh': () => jsonResponse(200, { accessToken: 'new-token' }),
-    });
-    const api = createApiClient({ fetchFn });
-    api.setAccessToken('old-token');
-    let announced = 0;
-    api.onTokenRefreshed(() => {
-      announced += 1;
-      assert.equal(api.getAccessToken(), 'new-token'); // the new token is already held when they hear of it
-    });
-
-    await api.request('/v1/data'); // renewed because a request was refused
-    await api.refresh(); // renewed because the page asked, as it does when it restores a session
-
-    assert.equal(announced, 2);
-  });
-
-  it('says nothing when the refresh fails', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(401, {}) }) });
-    let announced = 0;
-    api.onTokenRefreshed(() => {
-      announced += 1;
-    });
-
-    assert.equal(await api.refresh(), false);
-
-    assert.equal(announced, 0);
-  });
-
-  it('says nothing when the answer holds no token', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, {}) }) });
-    let announced = 0;
-    api.onTokenRefreshed(() => {
-      announced += 1;
-    });
-
-    assert.equal(await api.refresh(), false);
-
-    assert.equal(announced, 0);
-  });
-
-  it('announces once for callers that share one refresh', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
-    let announced = 0;
-    api.onTokenRefreshed(() => {
-      announced += 1;
-    });
-
-    await Promise.all([api.refresh(), api.refresh(), api.refresh()]);
-
-    assert.equal(announced, 1);
-  });
-
-  it('keeps the new token when a listener throws, and lets the other listeners hear', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
-    let heard = false;
-    api.onTokenRefreshed(() => {
-      throw new Error('a listener with a bug');
-    });
-    api.onTokenRefreshed(() => {
-      heard = true;
-    });
-
-    assert.equal(await api.refresh(), true);
-
-    assert.equal(api.getAccessToken(), 't');
-    assert.equal(heard, true);
-  });
-
-  it('lets a listener stop listening', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/site/refresh': jsonResponse(200, { accessToken: 't' }) }) });
-    let announced = 0;
-    const stop = api.onTokenRefreshed(() => {
-      announced += 1;
-    });
-    stop();
-
-    await api.refresh();
-
-    assert.equal(announced, 0);
-  });
-});
-
 describe('api client', () => {
-  it('adds the access token as a bearer header, and sends JSON bodies as JSON', async () => {
+  it('sends JSON bodies as JSON, and nothing that looks like a credential', async () => {
     const fetchFn = fakeFetch([jsonResponse(200, { ok: true })]);
     const api = createApiClient({ fetchFn });
-    api.setAccessToken('token-1');
 
     const result = await api.request('/v1/thing', { method: 'POST', body: { a: 1 } });
 
@@ -104,9 +14,11 @@ describe('api client', () => {
     const [call] = fetchFn.calls;
     assert.equal(call.path, '/v1/thing');
     assert.equal(call.init.method, 'POST');
-    assert.equal(authorizationOf(call), 'Bearer token-1');
     assert.equal(call.headers['Content-Type'], 'application/json');
+    assert.equal(call.headers.Accept, 'application/json');
     assert.equal(call.init.body, '{"a":1}');
+    // The sign-in is a cookie the browser sends by itself; the page holds no token to put in a header.
+    assert.ok(!Object.keys(call.headers).some((name) => name.toLowerCase() === 'authorization'));
   });
 
   it('sends the cookie only to its own origin', async () => {
@@ -117,16 +29,12 @@ describe('api client', () => {
     assert.equal(fetchFn.calls[0].init.credentials, 'same-origin');
   });
 
-  it('sends no Authorization header when it holds no token, or when asked not to', async () => {
-    const fetchFn = fakeFetch([jsonResponse(200, {}), jsonResponse(200, {})]);
-    const api = createApiClient({ fetchFn });
+  it('has no way to hold, read or renew a token', () => {
+    const api = createApiClient({ fetchFn: fakeFetch([]) });
 
-    await api.request('/v1/a');
-    api.setAccessToken('token-1');
-    await api.request('/v1/b', { auth: false });
-
-    assert.equal(authorizationOf(fetchFn.calls[0]), undefined);
-    assert.equal(authorizationOf(fetchFn.calls[1]), undefined);
+    for (const name of ['setAccessToken', 'getAccessToken', 'refresh', 'onTokenRefreshed']) {
+      assert.equal(api[name], undefined, name);
+    }
   });
 
   it('returns null for 204 No Content', async () => {
@@ -135,123 +43,53 @@ describe('api client', () => {
     assert.equal(await api.request('/v1/logout', { method: 'POST' }), null);
   });
 
-  it('refreshes once on a 401 and retries the request with the new token', async () => {
-    const fetchFn = routedFetch({
-      'GET /v1/data': (call) => (authorizationOf(call) === 'Bearer new-token' ? jsonResponse(200, { value: 42 }) : jsonResponse(401, {})),
-      'POST /v1/site/refresh': jsonResponse(200, { accessToken: 'new-token' }),
-    });
+  it('does not try to renew anything on a 401: it tells the listeners the session is over and throws the 401', async () => {
+    const fetchFn = routedFetch({ 'GET /v1/data': () => jsonResponse(401, { detail: 'nope', code: 'x' }) });
     const api = createApiClient({ fetchFn });
-    api.setAccessToken('old-token');
-
-    const result = await api.request('/v1/data');
-
-    assert.deepEqual(result, { value: 42 });
-    assert.equal(api.getAccessToken(), 'new-token');
-    assert.deepEqual(
-      fetchFn.calls.map((call) => `${call.init.method ?? 'GET'} ${call.path}`),
-      ['GET /v1/data', 'POST /v1/site/refresh', 'GET /v1/data'],
-    );
-  });
-
-  it('shares one refresh between requests that fail at the same time', async () => {
-    let refreshes = 0;
-    const fetchFn = routedFetch({
-      'GET /v1/a': (call) => (authorizationOf(call) === 'Bearer fresh' ? jsonResponse(200, { a: 1 }) : jsonResponse(401, {})),
-      'GET /v1/b': (call) => (authorizationOf(call) === 'Bearer fresh' ? jsonResponse(200, { b: 2 }) : jsonResponse(401, {})),
-      'GET /v1/c': (call) => (authorizationOf(call) === 'Bearer fresh' ? jsonResponse(200, { c: 3 }) : jsonResponse(401, {})),
-      'POST /v1/site/refresh': async () => {
-        refreshes += 1;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return jsonResponse(200, { accessToken: 'fresh' });
-      },
-    });
-    const api = createApiClient({ fetchFn });
-    api.setAccessToken('stale');
-
-    const results = await Promise.all([api.request('/v1/a'), api.request('/v1/b'), api.request('/v1/c')]);
-
-    // The refresh token rotates: a second refresh with the same cookie would look like a stolen token.
-    assert.equal(refreshes, 1);
-    assert.deepEqual(results, [{ a: 1 }, { b: 2 }, { c: 3 }]);
-  });
-
-  it('can refresh again later, once the first refresh has finished', async () => {
-    let refreshes = 0;
-    const fetchFn = routedFetch({
-      'POST /v1/site/refresh': () => {
-        refreshes += 1;
-        return jsonResponse(200, { accessToken: `token-${refreshes}` });
-      },
-    });
-    const api = createApiClient({ fetchFn });
-
-    assert.equal(await api.refresh(), true);
-    assert.equal(await api.refresh(), true);
-
-    assert.equal(refreshes, 2);
-    assert.equal(api.getAccessToken(), 'token-2');
-  });
-
-  it('gives up when the refresh fails: clears the token, tells listeners, and throws the 401', async () => {
-    const fetchFn = routedFetch({
-      'GET /v1/data': jsonResponse(401, { detail: 'nope', code: 'x' }),
-      'POST /v1/site/refresh': jsonResponse(401, { code: 'invalid_refresh_token' }),
-    });
-    const api = createApiClient({ fetchFn });
-    api.setAccessToken('old');
     let expired = 0;
     api.onSessionExpired(() => {
       expired += 1;
     });
 
-    await assert.rejects(api.request('/v1/data'), (error) => error instanceof ApiError && error.status === 401);
+    await assert.rejects(api.request('/v1/data'), (error) => error instanceof ApiError && error.status === 401 && error.code === 'x');
 
-    assert.equal(api.getAccessToken(), null);
+    assert.equal(expired, 1);
+    assert.deepEqual(
+      fetchFn.calls.map((call) => `${call.init.method ?? 'GET'} ${call.path}`),
+      ['GET /v1/data'], // no refresh, no retry
+    );
+  });
+
+  it('treats a permission change the same way: the 401 permissions_changed ends the session', async () => {
+    const fetchFn = fakeFetch([jsonResponse(401, { detail: 'Your permissions changed. Sign in again.', code: 'permissions_changed' })]);
+    const api = createApiClient({ fetchFn });
+    let expired = 0;
+    api.onSessionExpired(() => {
+      expired += 1;
+    });
+
+    await assert.rejects(api.request('/v1/menu'), (error) => error.status === 401 && error.code === 'permissions_changed');
+
     assert.equal(expired, 1);
   });
 
-  it('retries only once: a second 401 after a successful refresh is an error, not a loop', async () => {
-    const calls = [];
-    // Answers 401 to the data call every time, and a fresh token to the refresh call.
-    const fetchFn = async (path, init) => {
-      calls.push(`${init?.method ?? 'GET'} ${path}`);
-      return path === '/v1/data' ? jsonResponse(401, {}) : jsonResponse(200, { accessToken: 'new' });
-    };
-    const api = createApiClient({ fetchFn });
-    api.setAccessToken('old');
-
-    await assert.rejects(api.request('/v1/data'), (error) => error.status === 401);
-
-    assert.deepEqual(calls, ['GET /v1/data', 'POST /v1/site/refresh', 'GET /v1/data']);
-  });
-
-  it('treats a network failure during refresh as a failed refresh', async () => {
-    const fetchFn = async (path) => {
-      if (path === '/v1/site/refresh') {
-        throw new TypeError('network down');
-      }
-      return jsonResponse(401, {});
-    };
-    const api = createApiClient({ fetchFn });
-    api.setAccessToken('old');
-
-    assert.equal(await api.refresh(), false);
-    assert.equal(api.getAccessToken(), null);
-  });
-
-  it('does not refresh for errors other than 401', async () => {
+  it('does not announce an expiry for errors other than 401', async () => {
     for (const status of [400, 403, 404, 429, 500]) {
       const fetchFn = fakeFetch([jsonResponse(status, { detail: 'x' })]);
       const api = createApiClient({ fetchFn });
-      api.setAccessToken('t');
+      let expired = 0;
+      api.onSessionExpired(() => {
+        expired += 1;
+      });
 
       await assert.rejects(api.request('/v1/data'), (error) => error.status === status);
 
+      assert.equal(expired, 0, `status ${status}`);
       assert.equal(fetchFn.calls.length, 1, `status ${status}`);
     }
   });
 
-  it('does not refresh, or announce an expiry, when the sign-in call itself fails with 401', async () => {
+  it('does not announce an expiry when the sign-in call itself fails with 401', async () => {
     const fetchFn = fakeFetch([jsonResponse(401, { detail: 'Email or password is incorrect.', code: 'invalid_credentials' })]);
     const api = createApiClient({ fetchFn });
     let expired = 0;
@@ -266,6 +104,34 @@ describe('api client', () => {
 
     assert.equal(fetchFn.calls.length, 1);
     assert.equal(expired, 0);
+  });
+
+  it('lets a listener stop listening', async () => {
+    const api = createApiClient({ fetchFn: fakeFetch([jsonResponse(401, {})]) });
+    let expired = 0;
+    const stop = api.onSessionExpired(() => {
+      expired += 1;
+    });
+    stop();
+
+    await assert.rejects(api.request('/v1/data'));
+
+    assert.equal(expired, 0);
+  });
+
+  it('still throws the 401, and lets the other listeners hear, when a listener throws', async () => {
+    const api = createApiClient({ fetchFn: fakeFetch([jsonResponse(401, {})]) });
+    let heard = false;
+    api.onSessionExpired(() => {
+      throw new Error('a listener with a bug');
+    });
+    api.onSessionExpired(() => {
+      heard = true;
+    });
+
+    await assert.rejects(api.request('/v1/data'), (error) => error.status === 401);
+
+    assert.equal(heard, true);
   });
 
   it('turns a problem response into an ApiError with its message, code and field errors', async () => {
@@ -295,22 +161,5 @@ describe('api client', () => {
       assert.equal(error.errors, null);
       return true;
     });
-  });
-
-  it('lets a listener stop listening', async () => {
-    const fetchFn = routedFetch({
-      'GET /v1/data': jsonResponse(401, {}),
-      'POST /v1/site/refresh': jsonResponse(401, {}),
-    });
-    const api = createApiClient({ fetchFn });
-    let expired = 0;
-    const stop = api.onSessionExpired(() => {
-      expired += 1;
-    });
-    stop();
-
-    await assert.rejects(api.request('/v1/data'));
-
-    assert.equal(expired, 0);
   });
 });

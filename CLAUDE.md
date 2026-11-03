@@ -17,7 +17,7 @@ Instagram, SMS, WhatsApp and YouTube exist as empty stubs so they can be added l
 | Database | PostgreSQL 16 only. No other database, **no EF Core** |
 | Data access | Dapper over Npgsql, plain SQL in repository classes |
 | Frontend | `web-react/`: React 19, TypeScript (strict), Vite, React Router, plain CSS. No CSS framework, no jQuery. The older vanilla JavaScript app in `web/` stays until `web-react/` has everything it has (the Site admin's menu and permission editors are not ported yet) |
-| Auth | HS256 JWT access tokens (15 min, in browser memory only) + rotating refresh tokens (HttpOnly cookie scoped to /v1/auth) |
+| Auth | One HS256 JWT per sign-in, **30 days** (`Jwt:AccessTokenDays`), kept in an **HttpOnly cookie** that scripts cannot read. **No refresh token**: when it runs out, or the Site admin changes a permission, the person signs in again (see Sessions without refresh tokens) |
 | Email sending | `IEmailProvider`: fake provider for development, Amazon SES for production |
 | Tests | xUnit, Testcontainers.PostgreSql, Microsoft.AspNetCore.Mvc.Testing, NSubstitute; frontend: Vitest + React Testing Library (`web-react/`), `node --test` (the older `web/`) |
 
@@ -111,14 +111,19 @@ start a private cluster on a spare port for this.
 migrator sets that role's password from this string, so it is configured in one place. Environment variables work too
 (`Jwt__SigningKey`, `ConnectionStrings__App`).
 
+How long a sign-in lasts is `Jwt:AccessTokenDays` (default 30, allowed 1 to 90). The old `Jwt:AccessTokenMinutes` and
+`Jwt:RefreshTokenDays` no longer exist; leftover values for them in user-secrets or the environment are ignored.
+
 ## Database
 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
-  `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql` and `004_external_identities.sql` are released: do not
-  change them. `005_menus_permissions.sql` is the menus and permissions slice (released once committed). Phase 2 writes
-  `006_email.sql`. Every script runs on every start, so a later one may never change what an earlier one re-creates (for
-  example the return type of a function that `CREATE OR REPLACE` makes again): add a new function instead.
+  `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql`, `004_external_identities.sql` and
+  `005_menus_permissions.sql` are released: do not change them. `006_remove_refresh_tokens.sql` drops the two refresh token
+  tables and their lookups (released once committed). Phase 2 writes `007_email.sql`. Every script runs on every start, so a
+  later one may never change what an earlier one re-creates (for example the return type of a function that
+  `CREATE OR REPLACE` makes again): add a new function instead. (`001` and `002` still create the refresh token tables on
+  every start and `006` drops them again in the same transaction; that is harmless, and nothing may use those tables.)
 - The API connects as `app_user` (not superuser, no BYPASSRLS, never to be given either). `NpgsqlConnectionFactory`
   sets `app.agency_id` and `app.user_id` on every connection it opens; `app_agency_id()` / `app_user_id()` read them and
   return NULL when unset or empty, so access fails closed.
@@ -126,7 +131,7 @@ migrator sets that role's password from this string, so it is configured in one 
   timestamptz`, RLS **enabled and forced**, policy `tenant_isolation` (`USING` and `WITH CHECK` on `agency_id =
   app_agency_id()`). Status/type columns are `text` + `CHECK` with the lower-cased C# enum names. Foreign keys are
   indexed. snake_case names. `agencies` and `agency_members` also carry `business_model` (see Business models and roles).
-- Work that must span agencies (workers, login, refresh) uses narrow `SECURITY DEFINER` functions that return only ids
+- Work that must span agencies (workers, login) uses narrow `SECURITY DEFINER` functions that return only ids
   or the one row asked for. Never grant BYPASSRLS.
 - **Global configuration tables** (`permissions`, `role_permissions`, `permission_state`, `menu_pages`, `menu_items`) are not
   tenant tables: no `agency_id`, RLS still enabled and forced, `app_user` has `SELECT` only (none at all on
@@ -157,7 +162,8 @@ migrator sets that role's password from this string, so it is configured in one 
   `app_user` and proves isolation. Tests are independent: one PostgreSQL container per run, a fresh database per test class.
   Tests that need Docker carry `[Trait("Category", "Docker")]`.
 - Frontend: no `innerHTML` with API data (in React: no `dangerouslySetInnerHTML`); email previews in a sandboxed iframe; 360 px
-  first; every drag action has a tap alternative; tokens only in memory; never queue or send a campaign while offline.
+  first; every drag action has a tap alternative; **the sign-in token is never readable by a script** (an HttpOnly cookie: the
+  page holds no token, sends no Authorization header and stores nothing); never queue or send a campaign while offline.
 - Ask before: changing an existing table, adding a package, weakening a security rule.
 - Do not: use EF Core, a CSS framework or jQuery, a second frontend framework next to React, edit an applied migration, give `app_user` BYPASSRLS,
   commit secrets, write logic in the five channel stubs.
@@ -172,7 +178,7 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `006_email.sql` (was 002; the site admin, business model, Google sign-in and menus-and-permissions scripts took 002 to 005), senders, contacts, lists, suppressions, CSV import |
+| 2 | `007_email.sql` (was 002; the site admin, business model, Google sign-in, menus-and-permissions and refresh-token-removal scripts took 002 to 006), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
@@ -181,6 +187,12 @@ or was skipped, and any open question.
 | 8 | CI, README, seed data, security review |
 
 ## Decisions log
+
+> **Read this first.** Sessions changed after most of the entries below were written: there are **no refresh tokens**, a sign-in
+> is one 30-day JWT in an HttpOnly cookie, and the page holds no token. Wherever an entry below speaks of a refresh token or
+> cookie, `refresh_tokens`, `site_admin_refresh_tokens`, `/v1/auth/refresh`, `/v1/site/refresh`, a 15-minute access token, a token
+> "in memory only", `api.onTokenRefreshed` or a client that "refreshes and retries", it is history. The current rules are in
+> **Sessions without refresh tokens** at the end of this log.
 
 **Phase 0**
 - The repo was empty, so `001_init.sql` was written from the brief's description. Users are global (one person, many
@@ -552,3 +564,61 @@ added "but not in admin login"). Status: built, tested and checked in a real bro
   menu, four totals, reload restoring the session, nothing in storage, the member app not seeing the Site admin session, the
   drawer at 360 px, no horizontal scroll, a signed-in Site admin sent away from the login page, and sign-out. No script or CSP
   errors; the only console entries are the expected 401 answers.
+
+**Sessions without refresh tokens (requested by the user: "no need of refresh token; if the token expires just redirect to the login
+page; token expire time is 30 day limit"). Current; it supersedes every refresh-token entry above.**
+- A sign-in is **one JWT that lasts 30 days** (`Jwt:AccessTokenDays`, default 30, allowed 1 to 90; `AccessTokenMinutes` and
+  `RefreshTokenDays` are gone). Nothing is stored for a session. When the token runs out, or is refused, the person signs in
+  again: the client sends them to the sign-in form. The Site admin has the same 30 days (the user's choice; one setting).
+- Choices the user made, in plan mode: the token lives in an **HttpOnly cookie** (not localStorage, not memory only); **any
+  permission change signs everybody out** (no silent re-issue); the two refresh tables are **dropped**; the Site admin gets
+  the same 30 days.
+- **Why a cookie.** A reload loses anything held in page memory, and Google sign-in ends with a redirect and puts no token in an
+  address, so the token has to reach the browser as a cookie. As an HttpOnly cookie no script on the page can read it (so an
+  injected script cannot steal a 30-day token), and the page holds no token at all: no Authorization header, no JWT decoding, no
+  storage. `rules.test.ts` and `web/tests/rules.test.js` fail if a token, an Authorization/Bearer header or a refresh call
+  appears in the page's source.
+- **The cookies.** Member `access_token`, **Path=/v1**; Site admin `site_access_token`, **Path=/v1/site**; both HttpOnly,
+  **Secure always**, **SameSite=Strict**, `Expires` = the token's own expiry (`AccessTokenCookie`). Sign-in, sign-up, switch-agency
+  and the Google callback set the cookie and answer with `{expiresAt}` only: **the token is never in a response body or an
+  address**. `POST /v1/auth/refresh` and `POST /v1/site/refresh` are gone; logout (`/v1/auth/logout`, `/v1/site/logout`, still
+  `[AllowAnonymous]`) only clears the cookie at the path it was set at. `GET /v1/auth/me` and `GET /v1/site/me` gain
+  `sessionExpiresAt` (the token's `exp`), which the dashboards show as "Signed in until".
+- **Reading the token.** `ConfigureJwtBearerOptions` takes the token from an `Authorization: Bearer` header when the request has
+  one (tools, tests, Swagger), and otherwise from the cookie **by path**: a request under `/v1/site` reads only
+  `site_access_token`, every other request only `access_token`. A browser sends the member cookie to `/v1/site` too (its path is
+  `/v1`), so this is what keeps the two sessions apart: a member cookie never authenticates a Site admin route, and the Site admin
+  cookie is never read anywhere else. A header always wins over a cookie. Public endpoints (`[AllowAnonymous]`) answer for
+  themselves whatever stale cookie the browser still holds; `PermissionVersionMiddleware` skips them.
+- **A permission change.** The token still carries the permissions and `pv`. When the Site admin changes any grant every older member
+  token is answered 401 `permissions_changed` ("Your permissions changed. Sign in again."); the client treats any 401 on a call that
+  needs a session as the end of the session and shows the sign-in form. Nobody is renewed in the background.
+- **Database.** `006_remove_refresh_tokens.sql` drops `refresh_tokens`, `site_admin_refresh_tokens`, `auth_find_refresh_token()` and
+  `auth_find_site_refresh_token()` (changes existing tables, approved). `001` and `002` are released and still create them on every
+  start; `006` drops them again in the same transaction, which is harmless and tested for a superuser and for an owner that
+  row-level security binds (`RefreshTokenRemovalMigrationTests`). The migration count in `MigrationTests` is 11 tables. Phase 2's
+  script is now `007_email.sql`.
+- **Code removed.** `IRefreshTokenRepository`/`RefreshTokenRepository` and the Site admin pair, their models, `RefreshAsync` and
+  `LogoutAsync` in both services, the refresh branch of `SwitchAgencyAsync`, `TokenResponse`, `RefreshTokenCookie`. `AuthResult` is
+  now `(AccessToken, ExpiresAt)`. In both clients: `refresh()`, `getAccessToken/setAccessToken`, `onTokenRefreshed`, `jwt.js`/`jwt.ts`
+  and `session.getClaims()`. The session store asks `me` (then the menu) to restore after a reload, one call after the other so
+  a visitor costs one 401, and it removes the cookie again (logout) if sign-in succeeded but the page could not go on.
+- **What this costs, on purpose.** (1) **No revocation:** logout clears the browser's cookie, but a copied token works until it
+  expires (a test records this, `Logout_OnlyClearsTheBrowsersCookie_...`). This holds for the Site admin too; a demoted Site admin
+  is still cut off at once on every `/v1/site` data route because those check `site_admins` in the database on each call.
+  (2) **Roles and permissions in a token lag up to 30 days** where a policy reads them from the token (it was 15 minutes);
+  `/me` and the services still read the database. Any permission change ends every session, so permissions cannot be stale
+  that way; a **role or membership change can**. No endpoint changes or removes members yet; **when one is built it needs a way
+  to end sessions** (for example a per-user "valid after" timestamp checked in the token pipeline), or a removed member keeps
+  access for up to 30 days. (3) **Cookie authentication puts CSRF in scope** (a header token did not). SameSite=Strict keeps cross-site
+  requests from carrying the cookie; a sibling subdomain counts as same-site, so no site that serves user-supplied content may
+  share the parent domain. There are no state-changing GET endpoints. (4) A cookie is limited to about 4 KB; a token is well
+  under 1 KB, but a very long permission list would need a rethink. (5) Everyone signs in once after this change: the old
+  cookies and tokens are not read. (6) A permission edit is now disruptive (everyone signs in again); the editor says so.
+- **Tests.** C#: the issuer lifetime and settings validator, the services (no refresh work any more), cookie attributes and
+  expiry on every sign-in route, "the body holds no token", cookie-only and header-only authentication, garbage / expired /
+  wrongly signed / wrongly named cookies refused, the member and Site admin cookies never standing in for each other (also when the browser sends
+  both, and in other letter case), a stale permission version through the cookie, public endpoints ignoring a stale cookie,
+  `006` on a database that held the tables. Frontend: the API client (a 401 ends the session without any renewal, the sign-in's
+  own 401 does not), the session store (restore, sign-out removes the cookie, a failed start removes it), the dashboards, and the
+  source rules above.

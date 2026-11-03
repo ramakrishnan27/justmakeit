@@ -85,23 +85,30 @@ describe('the route guards', () => {
     expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
   });
 
-  it('sends the person to the sign-in form when a request finds the session can no longer be renewed', async () => {
-    let cookieIsGood = true;
-    const { api } = await renderApp(
+  it.each([
+    ['the sign-in ran out', { code: 'unauthenticated' }],
+    ['the Site admin changed a permission', { code: 'permissions_changed' }],
+  ])('sends the person to the sign-in form when a request finds that %s, without trying to renew it', async (_reason, problem) => {
+    const { api, fetchFn } = await renderApp(
       '/dashboard',
-      memberServer({}, {
-        'POST /v1/auth/refresh': () => (cookieIsGood ? jsonResponse(200, { accessToken: 'again' }) : jsonResponse(401, {})),
-        'GET /v1/anything': () => jsonResponse(401, {}),
-      }),
+      memberServer({}, { 'GET /v1/anything': () => jsonResponse(401, problem) }),
     );
     await heading('Welcome, Ana');
-    cookieIsGood = false;
 
     await act(async () => {
       await api.request('/v1/anything').catch(() => undefined);
     });
 
     expect(await heading('Welcome back')).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+    expect(fetchFn.calls.map(requestLine).filter((line) => line.includes('refresh'))).toEqual([]);
+  });
+
+  it('sends a visitor who opens a page behind sign-in to the sign-in form, after one question to the server', async () => {
+    const { fetchFn } = await renderApp('/workspaces', visitorServer());
+
+    expect(await heading('Welcome back')).toBeTruthy();
+    expect(fetchFn.calls.map(requestLine).filter((line) => line.includes('/me'))).toEqual(['GET /v1/auth/me']);
   });
 });
 

@@ -11,8 +11,8 @@ namespace Platform.IntegrationTests.Api;
 /// <summary>
 /// Permissions travel in the access token and every request is checked against them, with a real
 /// database: what a token carries after each way of signing in, and how a change the Site admin makes
-/// reaches a person who is already signed in (their token is refused, they refresh, the new token has
-/// the new permissions).
+/// reaches a person who is already signed in (their token is refused, they sign in again, the new token has
+/// the new permissions). There is no refresh, so signing in again is the only way to a current token.
 /// </summary>
 [Collection(PostgresCollection.Name)]
 [Trait("Category", "Docker")]
@@ -33,13 +33,6 @@ public sealed class PermissionTokenApiTests(PostgresFixture postgres) : AuthApiT
             "UPDATE role_permissions SET is_granted = @granted WHERE business_model = @model AND role = @role AND permission_key = @key",
             new { granted, model, role, key });
         Host.Factory.Services.GetRequiredService<IPermissionService>().Invalidate();
-    }
-
-    private async Task<(string AccessToken, string RefreshCookie)> RefreshAsync(string refreshCookie)
-    {
-        var response = await Host.PostAsync("/v1/auth/refresh", refreshCookie: refreshCookie);
-        AssertStatus(HttpStatusCode.OK, response);
-        return ((await ApiTestHost.ReadJsonAsync(response)).GetProperty("accessToken").GetString()!, ApiTestHost.RefreshCookieValue(response)!);
     }
 
     // --- What a token carries ----------------------------------------------------------------
@@ -69,16 +62,15 @@ public sealed class PermissionTokenApiTests(PostgresFixture postgres) : AuthApiT
     }
 
     [Fact]
-    public async Task LoginAndRefresh_IssueTheSamePermissions_UnderTheCurrentVersion()
+    public async Task RegisterAndLogin_IssueTheSamePermissions_UnderTheCurrentVersion()
     {
         var registered = await Host.RegisterAsync(businessModel: "company");
 
         var login = await Host.LoginAsync(registered.Email);
-        var (refreshed, _) = await RefreshAsync(login.RefreshToken);
 
+        Assert.Equal(PermissionKeys.All.Order(), PermissionsIn(registered.AccessToken));
         Assert.Equal(PermissionKeys.All.Order(), PermissionsIn(login.AccessToken));
-        Assert.Equal(PermissionKeys.All.Order(), PermissionsIn(refreshed));
-        Assert.Equal(await CurrentVersionAsync(), VersionIn(refreshed));
+        Assert.Equal(await CurrentVersionAsync(), VersionIn(login.AccessToken));
     }
 
     [Fact]
@@ -97,40 +89,41 @@ public sealed class PermissionTokenApiTests(PostgresFixture postgres) : AuthApiT
     // --- A change reaches people who are signed in -------------------------------------------
 
     [Fact]
-    public async Task ARevokedPermission_MakesTheOldTokenStale_AndTheRefreshedOneLacksIt()
+    public async Task ARevokedPermission_MakesTheOldTokenStale_AndTheNextSignInLacksIt()
     {
         var admin = await Host.RegisterAsync(businessModel: "company");
-        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Before" }, admin.AccessToken));
+        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Before" }, tokenCookie: admin.AccessToken));
 
         await SetGrantAsync("company", "organizationadmin", PermissionKeys.WorkspacesCreate, granted: false);
 
-        // The token they hold was issued under the old version: any request is told to refresh, not denied.
-        var stale = await Host.GetAsync("/v1/workspaces", admin.AccessToken);
+        // The token they hold was issued under the old version: any request is told to sign in again, not denied.
+        var stale = await Host.GetAsync("/v1/workspaces", tokenCookie: admin.AccessToken);
         AssertStatus(HttpStatusCode.Unauthorized, stale);
         Assert.Equal("permissions_changed", await CodeOfAsync(stale));
-        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/auth/me", admin.AccessToken));
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/auth/me", tokenCookie: admin.AccessToken));
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", admin.AccessToken)); // as a header too
 
-        var (fresh, _) = await RefreshAsync(admin.RefreshToken);
+        var fresh = (await Host.LoginAsync(admin.Email)).AccessToken;
 
         Assert.DoesNotContain(PermissionKeys.WorkspacesCreate, PermissionsIn(fresh));
         Assert.Contains(PermissionKeys.WorkspacesView, PermissionsIn(fresh));
-        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", fresh));
-        AssertStatus(HttpStatusCode.Forbidden, await Host.PostAsync("/v1/workspaces", new { name = "After" }, fresh));
+        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", tokenCookie: fresh));
+        AssertStatus(HttpStatusCode.Forbidden, await Host.PostAsync("/v1/workspaces", new { name = "After" }, tokenCookie: fresh));
     }
 
     [Fact]
-    public async Task AGrantedPermission_ReachesTheSamePersonAtTheirNextRefresh()
+    public async Task AGrantedPermission_ReachesTheSamePersonAtTheirNextSignIn()
     {
         var admin = await Host.RegisterAsync(businessModel: "company");
         await SetGrantAsync("company", "organizationadmin", PermissionKeys.WorkspacesCreate, granted: false);
-        var (withoutIt, cookie) = await RefreshAsync(admin.RefreshToken);
-        AssertStatus(HttpStatusCode.Forbidden, await Host.PostAsync("/v1/workspaces", new { name = "No" }, withoutIt));
+        var withoutIt = (await Host.LoginAsync(admin.Email)).AccessToken;
+        AssertStatus(HttpStatusCode.Forbidden, await Host.PostAsync("/v1/workspaces", new { name = "No" }, tokenCookie: withoutIt));
 
         await SetGrantAsync("company", "organizationadmin", PermissionKeys.WorkspacesCreate, granted: true);
 
-        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", withoutIt));
-        var (withIt, _) = await RefreshAsync(cookie);
-        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Yes" }, withIt));
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", tokenCookie: withoutIt));
+        var withIt = (await Host.LoginAsync(admin.Email)).AccessToken;
+        AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "Yes" }, tokenCookie: withIt));
     }
 
     [Fact]
@@ -140,21 +133,24 @@ public sealed class PermissionTokenApiTests(PostgresFixture postgres) : AuthApiT
 
         await SetGrantAsync("company", "organizationadmin", PermissionKeys.DataWrite, granted: false);
 
-        // Simple and safe: any change moves the one version, so everyone refreshes once.
-        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", creator.AccessToken));
-        var (fresh, _) = await RefreshAsync(creator.RefreshToken);
-        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", fresh));
+        // Simple and safe: any change moves the one version, so everyone signs in once more.
+        AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/workspaces", tokenCookie: creator.AccessToken));
+        var fresh = (await Host.LoginAsync(creator.Email)).AccessToken;
+        AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", tokenCookie: fresh));
     }
 
     [Fact]
-    public async Task ARefreshWithAStaleAccessTokenInHand_StillWorks_BecauseRefreshIsAPublicEndpoint()
+    public async Task ASignInWithAStaleTokenInTheBrowser_StillWorks_BecauseSignInIsAPublicEndpoint()
     {
         var admin = await Host.RegisterAsync();
         await SetGrantAsync("agency", "organizationadmin", PermissionKeys.DataWrite, granted: false);
 
-        var response = await Host.PostAsync("/v1/auth/refresh", accessToken: admin.AccessToken, refreshCookie: admin.RefreshToken);
+        // The browser still holds the old cookie when the person types their password: it must not get in the way.
+        var response = await Host.PostAsync(
+            "/v1/auth/login", new { email = admin.Email, password = ApiTestHost.DefaultPassword }, tokenCookie: admin.AccessToken);
 
         AssertStatus(HttpStatusCode.OK, response);
+        Assert.NotNull(ApiTestHost.MemberCookieValue(response));
     }
 
     [Fact]

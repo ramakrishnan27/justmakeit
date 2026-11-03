@@ -1,5 +1,7 @@
-// The only place that calls fetch. It keeps the access token in memory (never in storage), adds it to
-// each request, and when a request comes back 401 it refreshes the session once and retries.
+// The only place that calls fetch. A sign-in is an HttpOnly cookie that the browser sends by itself, so this client
+// holds no token and adds no header: scripts on the page can never read the credential. There is no refresh. When a
+// request that needs a session comes back 401 the session is over (it ran out after its 30 days, or the Site admin
+// changed a permission), the listeners are told, and the page goes back to the sign-in form.
 
 export class ApiError extends Error {
   /**
@@ -17,26 +19,18 @@ export class ApiError extends Error {
 }
 
 /**
- * @param {{ fetchFn?: typeof fetch, refreshPath?: string }} [options]
+ * @param {{ fetchFn?: typeof fetch }} [options]
  */
-export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...args), refreshPath = '/v1/site/refresh' } = {}) {
-  /** @type {string | null} */
-  let accessToken = null;
-  /** @type {Promise<boolean> | null} */
-  let refreshInFlight = null;
+export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...args) } = {}) {
   const expiredListeners = new Set();
-  const refreshedListeners = new Set();
 
-  function send(path, { method = 'GET', body, token = null } = {}) {
+  function send(path, { method = 'GET', body } = {}) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
 
-    // same-origin: the refresh cookie travels only to the API that set it.
+    // same-origin: the browser sends the session cookie, and only to the API that set it.
     return fetchFn(path, {
       method,
       headers,
@@ -56,60 +50,28 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
     return new ApiError(response.status, message, { code: problem?.code ?? null, errors: problem?.errors ?? null });
   }
 
-  // A listener that throws must not turn a good refresh into a failed one.
-  function announceRefresh() {
-    for (const listener of refreshedListeners) {
+  // A listener that throws must not hide the 401 from the caller, or stop the others from hearing of it.
+  function announceExpiry() {
+    for (const listener of expiredListeners) {
       try {
         listener();
       } catch {
-        // The listener's own problem; the new token is held either way.
+        // The listener's own problem.
       }
     }
-  }
-
-  /**
-   * Gets a new access token from the refresh cookie. Concurrent callers share one request, because the
-   * refresh token rotates: a second request with the same cookie would look like a stolen token.
-   * @returns {Promise<boolean>} true when a new access token is now held.
-   */
-  function refresh() {
-    if (!refreshInFlight) {
-      refreshInFlight = (async () => {
-        try {
-          const response = await send(refreshPath, { method: 'POST' });
-          if (!response.ok) {
-            accessToken = null;
-            return false;
-          }
-          accessToken = (await response.json()).accessToken ?? null;
-          if (accessToken !== null) {
-            announceRefresh();
-          }
-          return accessToken !== null;
-        } catch {
-          accessToken = null;
-          return false;
-        } finally {
-          refreshInFlight = null;
-        }
-      })();
-    }
-    return refreshInFlight;
   }
 
   /**
    * @param {string} path
-   * @param {{ method?: string, body?: unknown, auth?: boolean }} [options] auth:false for the sign-in call itself.
+   * @param {{ method?: string, body?: unknown, auth?: boolean }} [options] auth:false for the calls made outside a
+   * session (signing in, signing up, signing out): a 401 there is the answer, not the end of a session.
    */
   async function request(path, { method = 'GET', body, auth = true } = {}) {
-    let response = await send(path, { method, body, token: auth ? accessToken : null });
+    const response = await send(path, { method, body });
 
     if (response.status === 401 && auth) {
-      if (await refresh()) {
-        response = await send(path, { method, body, token: accessToken });
-      } else {
-        expiredListeners.forEach((listener) => listener());
-      }
+      // Nothing to renew: the session is over. The listeners send the person to sign in; the caller still gets the error.
+      announceExpiry();
     }
 
     if (!response.ok) {
@@ -120,23 +82,10 @@ export function createApiClient({ fetchFn = (...args) => globalThis.fetch(...arg
 
   return {
     request,
-    refresh,
-    getAccessToken: () => accessToken,
-    setAccessToken: (token) => {
-      accessToken = token;
-    },
-    /** Called when a request failed with 401 and the session could not be renewed. */
+    /** Called when a request that needed a session came back 401: the sign-in has ended. */
     onSessionExpired: (listener) => {
       expiredListeners.add(listener);
       return () => expiredListeners.delete(listener);
-    },
-    /**
-     * Called each time a refresh gives the page a new access token, whoever asked for it. The new token carries the
-     * permissions as they are now, so the session reloads its menu then.
-     */
-    onTokenRefreshed: (listener) => {
-      refreshedListeners.add(listener);
-      return () => refreshedListeners.delete(listener);
     },
   };
 }

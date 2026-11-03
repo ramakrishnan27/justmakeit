@@ -39,7 +39,7 @@ describe('the sign-in page', () => {
   });
 
   it('signs in and shows the dashboard, sending the trimmed email and the password as typed', async () => {
-    // visitorServer() is a server whose refresh cookie is no good, but whose sign-in works.
+    // visitorServer() is a server for a browser with no sign-in cookie: it answers 401 until the sign-in works.
     const { fetchFn } = await renderApp('/login', visitorServer());
     await heading('Welcome back');
 

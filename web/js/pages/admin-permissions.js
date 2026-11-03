@@ -5,7 +5,7 @@ import { roleTitle } from '../core/roles.js';
 /**
  * The Site admin's permission editor: for each permission, one checkbox for every role of every kind of organization.
  * Each tick is saved at once. The change reaches signed-in people the next time they make a request: their access token
- * is out of date, they renew it without signing out, and the new one carries the new permissions. A protected permission
+ * is out of date, so the server refuses it and they sign in again; the new token carries the new permissions. A protected permission
  * is shown ticked and cannot be changed. The router gives it `context = { api, session }` before it is attached.
  */
 class AdminPermissions extends HTMLElement {
@@ -21,7 +21,7 @@ class AdminPermissions extends HTMLElement {
       h(
         'p',
         { class: 'muted' },
-        'Choose which roles hold each permission. A tick is saved at once. People who are signed in pick the change up at their next request, without signing out.',
+        'Choose which roles hold each permission. A tick is saved at once. Any change signs everybody out: people who are signed in are asked to sign in again at their next request, and then have the new permissions.',
       ),
       this.statusRegion,
       this.errorRegion,

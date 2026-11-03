@@ -12,8 +12,8 @@ using Platform.Helpers.Results;
 namespace Platform.Auth.Controllers;
 
 /// <summary>
-/// The site admin console API. Sign-in and sessions use their own cookie (<c>site_refresh_token</c>, path
-/// /v1/site) and a token that carries the user and the <c>siteadmin</c> role but no agency. Every route is
+/// The site admin console API. Sign-in sets its own cookie (<c>site_access_token</c>, path /v1/site) holding a token
+/// that carries the user and the <c>siteadmin</c> role but no agency; there is no refresh. Every route is
 /// rate limited, responses are marked no-store, and the data routes need the <see cref="PolicyNames.SiteAdmin"/> policy.
 /// </summary>
 [ApiController]
@@ -27,37 +27,29 @@ public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboa
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Login(SiteLoginRequest request, CancellationToken cancellationToken)
     {
         request.Validate().ThrowIfAny();
         return Issue(await auth.LoginAsync(request, cancellationToken));
     }
 
-    /// <summary>Exchanges the site refresh cookie for a new access token and a new cookie.</summary>
-    [HttpPost("refresh")]
-    [AllowAnonymous]
-    [ProducesResponseType<TokenResponse>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Refresh(CancellationToken cancellationToken) =>
-        Issue(await auth.RefreshAsync(RefreshTokenCookie.Site.Read(Request), cancellationToken));
-
-    /// <summary>Revokes the site refresh token and removes the cookie. Safe to call without a session.</summary>
+    /// <summary>Signs out of this browser by removing the cookie. Safe to call without a session.</summary>
     [HttpPost("logout")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> Logout(CancellationToken cancellationToken)
+    public IActionResult Logout()
     {
-        await auth.LogoutAsync(RefreshTokenCookie.Site.Read(Request), cancellationToken);
-        RefreshTokenCookie.Site.Clear(Response);
+        AccessTokenCookie.Site.Clear(Response);
         return NoContent();
     }
 
-    /// <summary>The signed-in site admin.</summary>
+    /// <summary>The signed-in site admin, and when the sign-in ends.</summary>
     [HttpGet("me")]
     [Authorize(Policy = PolicyNames.SiteAdmin)]
     [ProducesResponseType<SiteMeResponse>(StatusCodes.Status200OK)]
     public async Task<ActionResult<SiteMeResponse>> Me(CancellationToken cancellationToken) =>
-        await auth.GetMeAsync(cancellationToken);
+        (await auth.GetMeAsync(cancellationToken)) with { SessionExpiresAt = User.SessionExpiresAt() };
 
     /// <summary>The site admin sidebar: the visible items of the admin menu. Read from memory, like the member menu.</summary>
     [HttpGet("menu")]
@@ -84,10 +76,10 @@ public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboa
         return await dashboard.ListAgenciesAsync(query, cancellationToken);
     }
 
-    // The refresh token leaves only through the cookie; the body carries the access token alone.
+    // The token leaves only through the cookie; the body says when it ends.
     private OkObjectResult Issue(AuthResult result)
     {
-        RefreshTokenCookie.Site.Write(Response, result.RefreshToken, result.RefreshTokenExpiresAt);
-        return Ok(result.Tokens);
+        AccessTokenCookie.Site.Write(Response, result.AccessToken, result.ExpiresAt);
+        return Ok(new SessionResponse(result.ExpiresAt));
     }
 }

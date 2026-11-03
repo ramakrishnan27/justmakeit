@@ -1,6 +1,7 @@
 // Starts the app for the address: the site admin app under /admin, the member app (sign in, create an account,
-// the pages behind the sidebar) everywhere else. Each restores its own session from its own refresh cookie, then lets
-// the router show the sign-in page or a page in the app shell. The token lives only in memory (see core/api.js).
+// the pages behind the sidebar) everywhere else. Each asks the server who its own cookie signs in, then lets the router
+// show the sign-in page or a page in the app shell. The page holds no token: the sign-in is an HttpOnly cookie that
+// scripts cannot read (see core/api.js).
 
 import { createApiClient } from './core/api.js';
 import { h } from './core/dom.js';
@@ -20,7 +21,7 @@ const app = appForPath(window.location.pathname);
 const isAdmin = app === adminApp;
 
 const root = document.getElementById('app');
-const api = createApiClient({ refreshPath: isAdmin ? '/v1/site/refresh' : '/v1/auth/refresh' });
+const api = createApiClient();
 const session = isAdmin ? createSession(api) : createSession(api, memberEndpoints);
 
 // One frame for every page behind sign-in. It is made once and reused, so the sidebar and the header are not rebuilt

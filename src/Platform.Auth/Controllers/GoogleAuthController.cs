@@ -79,7 +79,7 @@ public sealed class GoogleAuthController(IGoogleSignInService google) : Controll
         var outcome = await google.CompleteAsync(new GoogleCallback(code, state, error), stateCookie, cancellationToken);
         if (outcome.Session is { } session)
         {
-            RefreshTokenCookie.Agency.Write(Response, session.RefreshToken, session.RefreshTokenExpiresAt);
+            AccessTokenCookie.Member.Write(Response, session.AccessToken, session.ExpiresAt);
             return Redirect(AppHome);
         }
 

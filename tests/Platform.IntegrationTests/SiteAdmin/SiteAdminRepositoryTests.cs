@@ -134,7 +134,6 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(0, await DbTestSupport.CountAsync(asAdmin, "agencies"));
         Assert.Equal(0, await DbTestSupport.CountAsync(asAdmin, "agency_members"));
         Assert.Equal(0, await DbTestSupport.CountAsync(asAdmin, "workspaces"));
-        Assert.Equal(0, await DbTestSupport.CountAsync(asAdmin, "refresh_tokens"));
         Assert.Equal(1, await DbTestSupport.CountAsync(asAdmin, "users")); // only their own row
     }
 
@@ -290,10 +289,10 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
                    has_function_privilege('public', p.oid, 'EXECUTE')
             FROM pg_proc p
             WHERE p.pronamespace = 'public'::regnamespace
-              AND p.proname IN ('site_admin_overview', 'site_admin_list_agencies', 'auth_find_site_refresh_token')
+              AND p.proname IN ('site_admin_overview', 'site_admin_list_agencies')
             """)).ToList();
 
-        Assert.Equal(3, functions.Count);
+        Assert.Equal(2, functions.Count);
         Assert.All(functions, f =>
         {
             Assert.True(f.Definer, $"{f.Name} is not SECURITY DEFINER.");

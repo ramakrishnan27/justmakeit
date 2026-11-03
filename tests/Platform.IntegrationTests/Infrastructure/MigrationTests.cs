@@ -18,9 +18,7 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
     [InlineData("users")]
     [InlineData("agency_members")]
     [InlineData("workspaces")]
-    [InlineData("refresh_tokens")]
     [InlineData("site_admins")]
-    [InlineData("site_admin_refresh_tokens")]
     [InlineData("user_identities")]
     [InlineData("permissions")]
     [InlineData("role_permissions")]
@@ -76,8 +74,9 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var owner = await _db.OpenOwnerAsync();
         // 001_init.sql has five tables, 002_site_admin.sql two more, 004_external_identities.sql one and
-        // 005_menus_permissions.sql five; a second run adds none.
-        Assert.Equal(13, await DbTestSupport.ScalarAsync<long>(
+        // 005_menus_permissions.sql five, and 006_remove_refresh_tokens.sql drops the two that held refresh tokens
+        // (001 and 002 create them again on every run and 006 drops them again); a second run adds none.
+        Assert.Equal(11, await DbTestSupport.ScalarAsync<long>(
             owner,
             "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
             "WHERE n.nspname = 'public' AND c.relkind = 'r'"));
@@ -178,31 +177,24 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(0L, await lookup.ExecuteScalarAsync());
     }
 
-    [Fact]
-    public async Task AuthFindRefreshToken_FindsTheTokenByHash_WhileTheTableStaysHidden()
+    [Theory]
+    [InlineData("refresh_tokens")]
+    [InlineData("site_admin_refresh_tokens")]
+    public async Task TheRefreshTokenTables_AreGone_BecauseASignInIsOneTokenInACookieAndNothingIsStored(string table)
     {
         await using var owner = await _db.OpenOwnerAsync();
-        var agencyId = await DbTestSupport.InsertAgencyAsync(owner);
-        var userId = await DbTestSupport.InsertUserAsync(owner, "ann@example.com");
-        await DbTestSupport.ExecuteAsync(
-            owner,
-            "INSERT INTO refresh_tokens (agency_id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, now() + interval '1 day')",
-            agencyId, userId, "hash-1");
 
-        await using var app = await _db.OpenAppAsync();
+        Assert.Null(await DbTestSupport.ScalarAsync<string?>(owner, $"SELECT to_regclass('public.{table}')::text"));
+    }
 
-        Assert.Equal(0, await DbTestSupport.CountAsync(app, "refresh_tokens"));
+    [Theory]
+    [InlineData("auth_find_refresh_token")]
+    [InlineData("auth_find_site_refresh_token")]
+    public async Task TheRefreshTokenLookups_AreGone(string function)
+    {
+        await using var owner = await _db.OpenOwnerAsync();
 
-        await using var lookup = new NpgsqlCommand("SELECT user_id, agency_id, revoked_at FROM auth_find_refresh_token($1)", app)
-        {
-            Parameters = { new NpgsqlParameter<string> { TypedValue = "hash-1" } }
-        };
-        await using var reader = await lookup.ExecuteReaderAsync();
-
-        Assert.True(await reader.ReadAsync());
-        Assert.Equal(userId, reader.GetGuid(0));
-        Assert.Equal(agencyId, reader.GetGuid(1));
-        Assert.True(await reader.IsDBNullAsync(2));
+        Assert.Equal(0, await DbTestSupport.ScalarAsync<long>(owner, $"SELECT count(*) FROM pg_proc WHERE proname = '{function}'"));
     }
 
     [Fact]
@@ -210,7 +202,7 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
     {
         await using var owner = await _db.OpenOwnerAsync();
         await using var command = new NpgsqlCommand(
-            "SELECT proname, prosecdef, proconfig::text FROM pg_proc WHERE proname IN ('auth_find_user_by_email', 'auth_find_refresh_token') ORDER BY proname",
+            "SELECT proname, prosecdef, proconfig::text FROM pg_proc WHERE proname IN ('auth_find_user_by_email') ORDER BY proname",
             owner);
         await using var reader = await command.ExecuteReaderAsync();
 
@@ -222,7 +214,7 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
             Assert.Contains("search_path", reader.GetString(2));
         }
 
-        Assert.Equal(2, seen);
+        Assert.Equal(1, seen);
     }
 
     [Fact]

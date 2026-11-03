@@ -246,21 +246,22 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Callback_SetsTheAgencyRefreshCookie_SoThePageCanTurnItIntoASession()
+    public async Task Callback_SetsTheMemberTokenCookie_SoThePersonIsSignedInAfterTheRedirect()
     {
         var response = await RegisterThroughGoogleAsync("creator", "Maya Makes Videos");
 
-        var refresh = ApiTestHost.RefreshCookieValue(response);
-        Assert.NotNull(refresh);
-        var header = ApiTestHost.RefreshCookieHeader(response)!;
+        var token = ApiTestHost.MemberCookieValue(response);
+        Assert.NotNull(token);
+        var header = ApiTestHost.MemberCookieHeader(response)!;
         Assert.Contains("httponly", header, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", header, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", header, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("path=/v1/auth", header, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/v1;", header + ";", StringComparison.OrdinalIgnoreCase);
+        var expires = ApiTestHost.CookieExpires(response, ApiTestHost.MemberCookieName)!.Value;
+        Assert.InRange(expires, DateTimeOffset.UtcNow.AddDays(30).AddMinutes(-2), DateTimeOffset.UtcNow.AddDays(30).AddMinutes(2));
 
-        var renewed = await _host.PostAsync("/v1/auth/refresh", refreshCookie: refresh);
-        Assert.Equal(HttpStatusCode.OK, renewed.StatusCode);
-        var token = (await ApiTestHost.ReadJsonAsync(renewed)).GetProperty("accessToken").GetString()!;
-        var me = await ApiTestHost.ReadJsonAsync(await _host.GetAsync("/v1/auth/me", token));
+        // The browser sends that cookie to the app's next requests, and the app knows who is signed in.
+        var me = await ApiTestHost.ReadJsonAsync(await _host.GetAsync("/v1/auth/me", tokenCookie: token));
         Assert.Equal("creator", me.GetProperty("agency").GetProperty("businessModel").GetString());
         Assert.Equal("contentwriter", me.GetProperty("role").GetString());
         Assert.Equal("maya.rao@gmail.com", me.GetProperty("user").GetProperty("email").GetString());
@@ -271,9 +272,9 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
     {
         var response = await RegisterThroughGoogleAsync();
 
-        var refresh = ApiTestHost.RefreshCookieValue(response)!;
-        Assert.DoesNotContain(refresh, response.Headers.Location!.OriginalString);
-        Assert.DoesNotContain(refresh, await response.Content.ReadAsStringAsync());
+        var token = ApiTestHost.MemberCookieValue(response)!;
+        Assert.DoesNotContain(token, response.Headers.Location!.OriginalString);
+        Assert.DoesNotContain(token, await response.Content.ReadAsStringAsync());
         Assert.DoesNotContain("accessToken", response.Headers.Location.OriginalString, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -314,11 +315,10 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
         var response = await CallbackAsync(cookie, state);
 
         Assert.Equal("/dashboard", RedirectedTo(response));
-        Assert.NotNull(ApiTestHost.RefreshCookieValue(response));
+        Assert.NotNull(ApiTestHost.MemberCookieValue(response));
         Assert.Equal(1, await CountAsync("users"));
         Assert.Equal(1, await CountAsync("agencies"));
         Assert.Equal(1, await CountAsync("user_identities"));
-        Assert.Equal(2, await CountAsync("refresh_tokens"));
     }
 
     [Fact]
@@ -341,7 +341,7 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
         var response = await CallbackAsync(cookie, state);
 
         Assert.Equal("/login?error=google_no_account", RedirectedTo(response));
-        Assert.Null(ApiTestHost.RefreshCookieValue(response));
+        Assert.Null(ApiTestHost.MemberCookieValue(response));
         Assert.Equal(0, await CountAsync("users"));
     }
 
@@ -358,7 +358,7 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
         var response = await CallbackAsync(cookie, state);
 
         Assert.Equal(expected, RedirectedTo(response));
-        Assert.Null(ApiTestHost.RefreshCookieValue(response));
+        Assert.Null(ApiTestHost.MemberCookieValue(response));
         Assert.Equal(1, await CountAsync("users"));
         Assert.Equal(1, await CountAsync("agencies"));
         Assert.Equal(0, await CountAsync("user_identities"));
@@ -405,7 +405,7 @@ public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("invalid_credentials", (await ApiTestHost.ReadJsonAsync(response)).GetProperty("code").GetString());
-        Assert.Null(ApiTestHost.RefreshCookieValue(response));
+        Assert.Null(ApiTestHost.MemberCookieValue(response));
     }
 
     // --- Callback: refusing what this browser did not start ----------------------------------

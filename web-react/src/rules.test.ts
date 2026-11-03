@@ -1,6 +1,6 @@
-// Guards for the frontend rules in CLAUDE.md: tokens only in memory, and no markup built from strings (React escapes
-// what it renders; these keep it that way). They scan the source, so a change that breaks a rule fails here before it
-// reaches a browser.
+// Guards for the frontend rules in CLAUDE.md: the sign-in token is never readable by a script (it is an HttpOnly cookie
+// the page never touches), and no markup is built from strings (React escapes what it renders; these keep it that way).
+// They scan the source, so a change that breaks a rule fails here before it reaches a browser.
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
@@ -40,6 +40,14 @@ describe('frontend rules', () => {
 
   it('never writes a token or any session data to browser storage or a script-readable cookie', () => {
     expectNone(/\b(localStorage|sessionStorage|indexedDB|document\.cookie|caches\b|openDatabase)\b/);
+  });
+
+  it('never handles the credential: no Authorization header, no bearer token, no token held or decoded in the page', () => {
+    expectNone(/\bAuthorization\b|\bBearer\b|\baccessToken\b|\b(get|set)AccessToken\b|\bdecodeJwt\w*|\bjwt\b/i);
+  });
+
+  it('has no refresh: nothing asks a server to renew a token', () => {
+    expectNone(/\/refresh\b|\brefreshToken\b|\brefreshPath\b|\bonTokenRefreshed\b/);
   });
 
   it('never builds markup from strings: no innerHTML, outerHTML, insertAdjacentHTML, document.write or dangerouslySetInnerHTML', () => {

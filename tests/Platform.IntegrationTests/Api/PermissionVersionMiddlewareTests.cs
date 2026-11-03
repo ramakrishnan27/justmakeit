@@ -10,7 +10,8 @@ namespace Platform.IntegrationTests.Api;
 /// <summary>
 /// The permission version check, through the real pipeline and with a permission service the test
 /// controls, so no database is involved. A member token issued under another version (or with none)
-/// is answered 401 so the client refreshes; nothing else about the token is looked at first.
+/// is answered 401 so the person signs in again (there is no refresh); nothing else about the token is looked at first.
+/// The token may arrive as the HttpOnly cookie the web pages use or as a Bearer header; both are checked the same way.
 /// </summary>
 public sealed class PermissionVersionMiddlewareTests : IAsyncLifetime
 {
@@ -58,6 +59,26 @@ public sealed class PermissionVersionMiddlewareTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AStaleTokenInTheCookie_IsAnswered401PermissionsChanged_JustLikeOneInAHeader()
+    {
+        _permissions.Version = 5;
+        var stale = _host.Factory.CreateAccessTokenWithVersion(Guid.NewGuid(), Guid.NewGuid(), OrganizationRole.OrganizationAdmin, 4);
+
+        var response = await _host.GetAsync("/v1/workspaces", tokenCookie: stale);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("permissions_changed", await CodeOfAsync(response));
+    }
+
+    [Fact]
+    public async Task ACurrentTokenInTheCookie_ReachesAuthorization()
+    {
+        var response = await _host.PostAsync("/v1/workspaces", new { name = "" }, tokenCookie: Token());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task ATokenIssuedUnderANewerVersion_IsRefusedToo_NotOnlyAnOlderOne()
     {
         _permissions.Version = 5;
@@ -89,7 +110,7 @@ public sealed class PermissionVersionMiddlewareTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AStaleToken_IsToldToRefresh_NotDeniedForPermissionsItNeverWasJudgedBy()
+    public async Task AStaleToken_IsToldToSignInAgain_NotDeniedForPermissionsItNeverWasJudgedBy()
     {
         // A content writer cannot create a workspace (403 with a current token); with a stale one the answer is 401, not 403.
         _permissions.Version = 3;
@@ -116,17 +137,16 @@ public sealed class PermissionVersionMiddlewareTests : IAsyncLifetime
     [Theory]
     [InlineData("/v1/auth/login")]
     [InlineData("/v1/auth/register")]
-    [InlineData("/v1/auth/refresh")]
     [InlineData("/v1/auth/logout")]
-    public async Task APublicEndpoint_IgnoresAStaleToken_SoSigningInAndRefreshingAlwaysWork(string path)
+    public async Task APublicEndpoint_IgnoresAStaleToken_SoSigningInAgainAlwaysWorks(string path)
     {
         _permissions.Version = 5;
         var stale = _host.Factory.CreateAccessTokenWithVersion(Guid.NewGuid(), Guid.NewGuid(), OrganizationRole.OrganizationAdmin, 1);
         _permissions.ResetReads();
 
-        var response = await _host.PostAsync(path, new { }, stale);
+        var response = await _host.PostAsync(path, new { }, tokenCookie: stale);
 
-        // Each answers for itself (400 for the empty forms, 401 invalid_refresh_token without a cookie, 204), never with the version refusal.
+        // Each answers for itself (400 for the empty forms, 204 for logout), never with the version refusal.
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             Assert.NotEqual("permissions_changed", await CodeOfAsync(response));

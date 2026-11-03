@@ -10,8 +10,8 @@ using Platform.Helpers.Constants;
 namespace Platform.Auth.Controllers;
 
 /// <summary>
-/// The Site admin's editor for who holds which permission. A change raises the permission version, so everybody
-/// who is signed in is asked to refresh once and then carries the new permissions.
+/// The Site admin's editor for who holds which permission. A change raises the permission version, so every
+/// member who is signed in is sent back to sign in, and then carries the new permissions.
 /// </summary>
 [ApiController]
 [Route("v1/site/permissions")]

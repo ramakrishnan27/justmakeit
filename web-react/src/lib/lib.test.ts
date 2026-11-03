@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, createApiClient } from '@/api/client';
 import { PERMISSIONS } from '@/access/permissions';
-import { decodeJwtPayload } from '@/session/jwt';
-import { jsonResponse, makeJwt, routedFetch } from '@/test/helpers';
+import { jsonResponse, routedFetch } from '@/test/helpers';
 import { businessModelLabel, countLabel, formatDate, formatNumber, planLabel } from './format';
 import { googleLoginPath, googleRegisterPath, loadProviders, splitErrorCode } from './google';
 import {
@@ -44,18 +43,6 @@ describe('format', () => {
     expect(countLabel(1, 'workspace')).toBe('1 workspace');
     expect(countLabel(3, 'workspace')).toBe('3 workspaces');
     expect(countLabel(0, 'client workspace')).toBe('0 client workspaces');
-  });
-});
-
-describe('decodeJwtPayload', () => {
-  it('reads the claims, and nothing else', () => {
-    expect(decodeJwtPayload(makeJwt({ user_id: 'u1', role: 'x' }))).toEqual({ user_id: 'u1', role: 'x' });
-  });
-
-  it('gives null for anything that is not a readable token', () => {
-    for (const token of [undefined, null, '', 'a.b', 'a..c', 'a.!!!.c', `a.${btoa('[1]')}.c`, `a.${btoa('"text"')}.c`]) {
-      expect(decodeJwtPayload(token as string | null | undefined), String(token)).toBeNull();
-    }
   });
 });
 

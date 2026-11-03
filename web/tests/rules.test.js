@@ -1,5 +1,6 @@
-// Guards for the frontend rules in CLAUDE.md: tokens only in memory, and no innerHTML with API data.
-// They scan the source, so a change that breaks a rule fails here before it reaches a browser.
+// Guards for the frontend rules in CLAUDE.md: the sign-in token is never readable by a script (it is an HttpOnly cookie
+// the page never touches), and no innerHTML with API data. They scan the source, so a change that breaks a rule fails
+// here before it reaches a browser.
 
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -30,6 +31,20 @@ describe('frontend rules', () => {
 
   it('never writes a token or any session data to browser storage or a script-readable cookie', () => {
     const banned = /\b(localStorage|sessionStorage|indexedDB|document\.cookie|caches\b|openDatabase)\b/;
+    for (const script of scripts) {
+      assert.doesNotMatch(code(script), banned, relative(webRoot, script));
+    }
+  });
+
+  it('never handles the credential: no Authorization header, no bearer token, no token held or decoded in the page', () => {
+    const banned = /\bAuthorization\b|\bBearer\b|\baccessToken\b|\b(get|set)AccessToken\b|\bdecodeJwt\w*|\bjwt\b/i;
+    for (const script of scripts) {
+      assert.doesNotMatch(code(script), banned, relative(webRoot, script));
+    }
+  });
+
+  it('has no refresh: nothing asks a server to renew a token', () => {
+    const banned = /\/refresh\b|\brefreshToken\b|\brefreshPath\b|\bonTokenRefreshed\b/;
     for (const script of scripts) {
       assert.doesNotMatch(code(script), banned, relative(webRoot, script));
     }

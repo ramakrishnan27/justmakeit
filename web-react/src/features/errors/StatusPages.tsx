@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { PageTitle } from '@/components/ui/PageTitle';
 import { useApp } from '@/navigation/AppContext';
 
-/** Shown while the session is being restored from the refresh cookie, before anyone knows whether to show a page or the sign-in form. */
+/** Shown while the session is being restored from the sign-in cookie, before anyone knows whether to show a page or the sign-in form. */
 export function BootScreen() {
   return (
     <p className="boot" role="status">

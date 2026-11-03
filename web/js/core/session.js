@@ -1,11 +1,13 @@
-// The signed-in state of the page. It lives in memory only: reloading the page asks the API to
-// restore it from the refresh cookie, so nothing about the session is ever written to storage.
+// The signed-in state of the page. The sign-in itself is an HttpOnly cookie the browser holds and sends, so this
+// store has no token: it holds only what the server says about the person (`me`) and is rebuilt after a reload by
+// asking `me` again. Nothing about the session is ever written to storage.
 //
-// A signed-in session also holds the sidebar and the permissions of the person. They are read once when the
-// person signs in or the page restores them, and again each time the access token is renewed (which is when a
-// change the Site admin made reaches them). Moving between pages reads the copy in memory, never the server.
+// There is no refresh. A sign-in lasts 30 days; when a request comes back 401 (it ran out, or the Site admin changed
+// a permission and every older token is refused) the store becomes signed out and the page shows the sign-in form.
+//
+// A signed-in session also holds the sidebar and the permissions of the person, read once when the person signs in
+// or the page restores them. Moving between pages reads the copy in memory, never the server.
 
-import { decodeJwtPayload } from './jwt.js';
 import { adminFallbackItems, parseMenu } from './menu.js';
 
 const signedOutState = { status: 'signedOut', user: null, role: null };
@@ -66,24 +68,36 @@ export function createSession(api, endpoints = siteAdminEndpoints) {
     }
   }
 
+  // Who is signed in, then their menu. One after the other: with no session the first answer is 401 and a second
+  // request would only repeat it.
   async function loadMe() {
-    const [me, menu] = await Promise.all([api.request(endpoints.me), readMenuToStart()]);
-    setState({ status: 'signedIn', ...endpoints.toState(me), menu: menu.items, permissions: menu.permissions });
+    const me = await api.request(endpoints.me);
+    const menu = await readMenuToStart();
+    setState({ status: 'signedIn', ...endpoints.toState(me), menu: menu.items, permissions: menu.permissions, expiresAt: me.sessionExpiresAt ?? null });
   }
 
-  // Sign-in and sign-up both end the same way: an access token in memory, then the user, role and menu from the API.
+  async function endSession() {
+    try {
+      await api.request(endpoints.logout, { method: 'POST', auth: false });
+    } catch {
+      // The server could not be reached. The caller still forgets the session.
+    }
+  }
+
+  // Sign-in and sign-up both end the same way: the server sets the cookie, then the user, role and menu come from the API.
   async function start(path, body) {
-    const tokens = await api.request(path, { method: 'POST', body, auth: false });
-    api.setAccessToken(tokens.accessToken);
+    await api.request(path, { method: 'POST', body, auth: false });
     try {
       await loadMe();
     } catch (error) {
-      api.setAccessToken(null);
+      // The cookie is set but the page cannot go on (a member whose menu cannot be read): do not leave a session behind
+      // that the next reload would restore into the same failure.
+      await endSession();
       throw error;
     }
   }
 
-  // Reads the menu again. If that fails the person keeps the one they have: a failed refresh of the menu is not a
+  // Reads the menu again. If that fails the person keeps the one they have: a failed read of the menu is not a
   // reason to take it away, and a session that really ended is announced by the request itself.
   async function reloadMenu() {
     if (state.status !== 'signedIn') {
@@ -100,18 +114,10 @@ export function createSession(api, endpoints = siteAdminEndpoints) {
     }
   }
 
-  // A request that failed with 401 and could not renew the session means the user is signed out.
+  // A request that failed with 401 means the sign-in is over: the user is signed out.
   api.onSessionExpired(() => {
     if (state.status === 'signedIn') {
       setState(signedOutState);
-    }
-  });
-
-  // A renewed token carries the permissions as they are now, so what the person sees is read again with it. Not while
-  // signing in or restoring (the status is not yet signedIn then; those read the menu themselves).
-  api.onTokenRefreshed(() => {
-    if (state.status === 'signedIn') {
-      void session.refreshMenu();
     }
   });
 
@@ -119,9 +125,6 @@ export function createSession(api, endpoints = siteAdminEndpoints) {
     get state() {
       return state;
     },
-
-    /** The claims of the current access token, for display. Null when signed out. */
-    getClaims: () => decodeJwtPayload(api.getAccessToken()),
 
     subscribe(listener) {
       listeners.add(listener);
@@ -141,18 +144,16 @@ export function createSession(api, endpoints = siteAdminEndpoints) {
       await start(endpoints.register, details);
     },
 
-    /** Called once when the page starts: turns the refresh cookie, if there is one, back into a session. */
+    /** Called once when the page starts: asks the server who the cookie, if there is one, signs in. */
     async restore() {
-      if (await api.refresh()) {
-        try {
-          await loadMe();
-          return true;
-        } catch {
-          api.setAccessToken(null);
-        }
+      try {
+        await loadMe();
+        return true;
+      } catch {
+        // No cookie, an expired one, or a server that cannot answer: the person is not signed in.
+        setState(signedOutState);
+        return false;
       }
-      setState(signedOutState);
-      return false;
     },
 
     /**
@@ -167,12 +168,7 @@ export function createSession(api, endpoints = siteAdminEndpoints) {
     },
 
     async signOut() {
-      try {
-        await api.request(endpoints.logout, { method: 'POST', auth: false });
-      } catch {
-        // The server could not be reached. The page still forgets the session below.
-      }
-      api.setAccessToken(null);
+      await endSession();
       setState(signedOutState);
     },
   };

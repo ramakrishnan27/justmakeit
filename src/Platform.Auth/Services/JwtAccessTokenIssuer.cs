@@ -10,9 +10,10 @@ using Platform.Infrastructure.Data;
 namespace Platform.Auth.Services;
 
 /// <summary>
-/// Issues the access token: HS256, signed with <c>Jwt:SigningKey</c>, valid for <c>Jwt:AccessTokenMinutes</c>,
+/// Issues the access token: HS256, signed with <c>Jwt:SigningKey</c>, valid for <c>Jwt:AccessTokenDays</c>,
 /// carrying only the user, the role and, for agency members, the agency, the permissions the role holds and
-/// the version they were read under. The validation side is
+/// the version they were read under. It is the only credential: there is no refresh token, so it lives in an
+/// HttpOnly cookie (see <c>AccessTokenCookie</c>) for its whole life. The validation side is
 /// <see cref="ConfigureJwtBearerOptions"/>.
 /// </summary>
 public sealed class JwtAccessTokenIssuer(IOptions<JwtSettings> options, TimeProvider time) : IAccessTokenIssuer
@@ -41,7 +42,7 @@ public sealed class JwtAccessTokenIssuer(IOptions<JwtSettings> options, TimeProv
     {
         var jwt = options.Value;
         var now = time.GetUtcNow();
-        var expires = now.AddMinutes(jwt.AccessTokenMinutes);
+        var expires = now.AddDays(jwt.AccessTokenDays);
 
         claims[JwtRegisteredClaimNames.Jti] = Guid.NewGuid().ToString("N");
 

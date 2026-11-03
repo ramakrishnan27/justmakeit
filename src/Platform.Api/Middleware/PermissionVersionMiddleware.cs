@@ -8,15 +8,15 @@ namespace Platform.Api.Middleware;
 
 /// <summary>
 /// Refuses an organization member's access token that was issued before the Site admin last changed a
-/// permission, with 401 <c>permissions_changed</c>. The web client already answers a 401 by refreshing
-/// and retrying, and the refresh puts the current permissions in the new token. The comparison is one
-/// number from <see cref="IPermissionService"/>, which keeps the current version in memory, so this costs
-/// no database read per request. A token with no version (one issued before permissions travelled in the
-/// token) is out of date too.
+/// permission, with 401 <c>permissions_changed</c>. There is no refresh: the web client treats any 401 as the end of the
+/// session and sends the person to the sign-in page, and the token they get there carries the current permissions.
+/// The comparison is one number from <see cref="IPermissionService"/>, which keeps the current version in memory,
+/// so this costs no database read per request. A token with no version (one issued before permissions travelled in
+/// the token) is out of date too.
 /// <para>
 /// Site admin tokens carry no permissions and are skipped, and so are endpoints marked
-/// <c>[AllowAnonymous]</c> (sign-in and refresh must work with whatever token the browser still holds).
-/// It runs before authorization, so an out-of-date token is told to refresh (401) instead of being
+/// <c>[AllowAnonymous]</c> (sign-in must work with whatever token the browser still holds).
+/// It runs before authorization, so an out-of-date token is told to sign in again (401) instead of being
 /// denied (403) for permissions it was never meant to be judged by. If the current version cannot be
 /// read the exception is not caught: the request fails (500) and is never let through.
 /// </para>
@@ -35,7 +35,7 @@ public sealed class PermissionVersionMiddleware(RequestDelegate next)
 
             if (presented != current)
             {
-                throw new UnauthorizedException("Your permissions changed. Refresh your session.", "permissions_changed");
+                throw new UnauthorizedException("Your permissions changed. Sign in again.", "permissions_changed");
             }
         }
 

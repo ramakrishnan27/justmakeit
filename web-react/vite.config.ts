@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vitest/config';
 
 // Where the API runs while developing. The dev server forwards /v1 to it, so the page and the API share one origin
-// and the refresh cookie (HttpOnly, Secure, Path=/v1/auth) works exactly as it does when the API serves the page.
+// and the sign-in cookie (HttpOnly, Secure, SameSite=Strict, Path=/v1) works exactly as it does when the API serves the page.
 const apiTarget = process.env.VITE_API_TARGET ?? 'http://localhost:5080';
 
 // The page allows scripts and styles from its own origin only. The development server needs an inline script for hot

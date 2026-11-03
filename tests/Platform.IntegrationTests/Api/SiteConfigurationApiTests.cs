@@ -56,12 +56,8 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
     private async Task<HttpResponseMessage> UpdateAsync(string menu, Guid id, string label, string icon, bool visible) =>
         await Host.PutAsync($"/v1/site/menus/{menu}/items/{id}", new { label, icon, isVisible = visible }, await SiteAdminTokenAsync());
 
-    private async Task<(string AccessToken, string RefreshCookie)> RefreshAsync(string refreshCookie)
-    {
-        var response = await Host.PostAsync("/v1/auth/refresh", refreshCookie: refreshCookie);
-        AssertStatus(HttpStatusCode.OK, response);
-        return ((await ApiTestHost.ReadJsonAsync(response)).GetProperty("accessToken").GetString()!, ApiTestHost.RefreshCookieValue(response)!);
-    }
+    // There is no refresh: a person whose token is out of date signs in again, and the new token carries today's permissions.
+    private async Task<string> SignInAgainAsync(Session member) => (await Host.LoginAsync(member.Email)).AccessToken;
 
     // --- Reading a menu ----------------------------------------------------------------------
 
@@ -357,7 +353,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         Assert.False(await OwnerQueryAsync<bool>(
             "SELECT is_granted FROM role_permissions WHERE business_model = 'agency' AND role = 'organizationadmin' AND permission_key = 'workspaces.create'"));
 
-        // The same again changes nothing, and so does not ask everybody to refresh.
+        // The same again changes nothing, and so does not send everybody back to sign in.
         AssertStatus(HttpStatusCode.OK, await Host.PutAsync(
             $"/v1/site/permissions/{PermissionKeys.WorkspacesCreate}/grants",
             new { businessModel = "agency", role = "organizationadmin", granted = false }, token));
@@ -388,7 +384,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
     // --- A change reaches the people it concerns ----------------------------------------------
 
     [Fact]
-    public async Task RevokingWorkspacesView_TakesTheItemAndTheEndpointFromThoseWhoLoseIt_AfterTheyRefresh()
+    public async Task RevokingWorkspacesView_TakesTheItemAndTheEndpointFromThoseWhoLoseIt_AfterTheySignInAgain()
     {
         var companyAdmin = await Host.RegisterAsync(businessModel: "company");
         var agencyAdmin = await Host.RegisterAsync(businessModel: "agency");
@@ -400,12 +396,12 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
             $"/v1/site/permissions/{PermissionKeys.WorkspacesView}/grants",
             new { businessModel = "company", role = "organizationadmin", granted = false }, token));
 
-        // Everybody's token is out of date now, whoever the change concerned: they are told to refresh.
+        // Everybody's token is out of date now, whoever the change concerned: they are told to sign in again.
         AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/menu", companyAdmin.AccessToken));
         AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/menu", agencyAdmin.AccessToken));
 
-        var (companyFresh, _) = await RefreshAsync(companyAdmin.RefreshToken);
-        var (agencyFresh, _) = await RefreshAsync(agencyAdmin.RefreshToken);
+        var companyFresh = await SignInAgainAsync(companyAdmin);
+        var agencyFresh = await SignInAgainAsync(agencyAdmin);
 
         // The company admin lost it: not in the menu, not in the token, and the endpoint refuses.
         Assert.Equal(["Dashboard"], await MemberLabelsAsync(companyFresh));
@@ -418,7 +414,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
     }
 
     [Fact]
-    public async Task GrantingItBack_RestoresTheItemAfterAnotherRefresh()
+    public async Task GrantingItBack_RestoresTheItemAfterTheySignInAgain()
     {
         var admin = await Host.RegisterAsync(businessModel: "company");
         var token = await SiteAdminTokenAsync();
@@ -427,19 +423,19 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         var url = $"/v1/site/permissions/{PermissionKeys.WorkspacesView}/grants";
 
         await Host.PutAsync(url, revoke, token);
-        var (without, cookie) = await RefreshAsync(admin.RefreshToken);
+        var without = await SignInAgainAsync(admin);
         Assert.Equal(["Dashboard"], await MemberLabelsAsync(without));
 
         await Host.PutAsync(url, grant, token);
         AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/menu", without));
-        var (with, _) = await RefreshAsync(cookie);
+        var with = await SignInAgainAsync(admin);
 
         Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(with));
         AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", with));
     }
 
     [Fact]
-    public async Task GrantingWorkspacesCreate_ToAContentWriter_LetsThemCreateAfterTheyRefresh()
+    public async Task GrantingWorkspacesCreate_ToAContentWriter_LetsThemCreateAfterTheySignInAgain()
     {
         // A content writer is a member of a company; sign them in for real so their token comes from the issuer.
         var founder = await Host.RegisterAsync(businessModel: "company");
@@ -460,7 +456,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
             new { businessModel = "company", role = "contentwriter", granted = true }, await SiteAdminTokenAsync()));
 
         AssertStatus(HttpStatusCode.Unauthorized, await Host.PostAsync("/v1/workspaces", new { name = "Stale" }, writer.AccessToken));
-        var (fresh, _) = await RefreshAsync(writer.RefreshToken);
+        var fresh = await SignInAgainAsync(writer);
         AssertStatus(HttpStatusCode.Created, await Host.PostAsync("/v1/workspaces", new { name = "After" }, fresh));
     }
 

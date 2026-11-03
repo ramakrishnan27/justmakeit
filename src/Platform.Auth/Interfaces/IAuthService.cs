@@ -18,14 +18,8 @@ public interface IAuthService
     /// <summary>Starts a session for a user the outside provider has already identified, in their most recently used organization.</summary>
     Task<AuthResult> LoginExternalAsync(Guid userId, CancellationToken cancellationToken);
 
-    /// <summary>Rotates the refresh token: the presented one is revoked and a new one issued.</summary>
-    Task<AuthResult> RefreshAsync(string? refreshToken, CancellationToken cancellationToken);
-
-    /// <summary>Revokes the refresh token. Never fails for a token that is unknown or already revoked.</summary>
-    Task LogoutAsync(string? refreshToken, CancellationToken cancellationToken);
-
-    /// <summary>Issues tokens for another agency the signed-in user belongs to.</summary>
-    Task<AuthResult> SwitchAgencyAsync(SwitchAgencyRequest request, string? currentRefreshToken, CancellationToken cancellationToken);
+    /// <summary>Issues a new access token for another agency the signed-in user belongs to.</summary>
+    Task<AuthResult> SwitchAgencyAsync(SwitchAgencyRequest request, CancellationToken cancellationToken);
 
     Task<MeResponse> GetMeAsync(CancellationToken cancellationToken);
 }

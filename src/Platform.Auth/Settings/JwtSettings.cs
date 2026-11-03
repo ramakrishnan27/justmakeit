@@ -15,10 +15,11 @@ public sealed class JwtSettings
     /// <summary>Secret for signing access tokens. Never in the repository: user-secrets or environment only.</summary>
     public string SigningKey { get; set; } = string.Empty;
 
-    public int AccessTokenMinutes { get; set; } = 15;
-
-    /// <summary>How long a refresh token (the HttpOnly cookie) stays valid. Each refresh issues a new one.</summary>
-    public int RefreshTokenDays { get; set; } = 30;
+    /// <summary>
+    /// How long a sign-in lasts. The token is kept in an HttpOnly cookie that expires with it; there is no refresh,
+    /// so when it runs out the person signs in again.
+    /// </summary>
+    public int AccessTokenDays { get; set; } = 30;
 
     public byte[] GetSigningKeyBytes() => Encoding.UTF8.GetBytes(SigningKey);
 }

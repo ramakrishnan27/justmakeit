@@ -47,7 +47,6 @@ public static class AuthModule
         services.AddScoped<IAccountRepository, AccountRepository>();
         services.AddScoped<IAgencyRepository, AgencyRepository>();
         services.AddScoped<IMembershipRepository, MembershipRepository>();
-        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
@@ -55,7 +54,6 @@ public static class AuthModule
         services.AddOptions<SiteAdminSettings>().BindConfiguration(SiteAdminSettings.SectionName);
         services.AddSingleton<IValidateOptions<SiteAdminSettings>, SiteAdminSettingsValidator>();
         services.AddScoped<ISiteAdminRepository, SiteAdminRepository>();
-        services.AddScoped<ISiteAdminRefreshTokenRepository, SiteAdminRefreshTokenRepository>();
         services.AddScoped<ISiteAdminAuthService, SiteAdminAuthService>();
         services.AddScoped<ISiteAdminDashboardService, SiteAdminDashboardService>();
         services.AddSingleton<ISiteAdminBootstrapper, SiteAdminBootstrapper>();

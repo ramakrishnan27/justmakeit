@@ -20,7 +20,7 @@ public static class AuthPolicies
             .Build();
 
         // Closed by default: an endpoint with no attribute at all still needs a signed-in user, and
-        // the few public ones (register, login, refresh, logout, health) opt out with [AllowAnonymous].
+        // the few public ones (register, login, logout, health) opt out with [AllowAnonymous].
         options.DefaultPolicy = signedIn;
         options.FallbackPolicy = signedIn;
 

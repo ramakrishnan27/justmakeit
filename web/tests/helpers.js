@@ -48,9 +48,3 @@ export function routedFetch(routes) {
   fetchFn.calls = calls;
   return fetchFn;
 }
-
-/** Builds an unsigned-looking JWT with the given payload, for display tests. */
-export function makeJwt(payload) {
-  const encode = (value) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.signature`;
-}

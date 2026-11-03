@@ -15,15 +15,16 @@ if (!container) {
 }
 
 // The page holds two apps that never share a session: the Site admin app under /admin and the member app everywhere
-// else. The address the page was opened at says which one this is, and it gets its own API client (the refresh cookie
-// it renews from is different) and its own session.
+// else. The address the page was opened at says which one this is, and it gets its own session (its own endpoints, and
+// the browser sends it its own cookie).
 //
-// The access token lives only in the client's memory; reloading the page turns the refresh cookie back into a session.
-// Until that finishes the status is "unknown" and the routes show a loading line, so a page is never drawn and then
-// replaced by the sign-in form.
+// The page holds no token: the sign-in is an HttpOnly cookie the browser sends by itself, which scripts cannot read.
+// Reloading the page asks the server who the cookie signs in (`me`). Until that finishes the status is "unknown" and the
+// routes show a loading line, so a page is never drawn and then replaced by the sign-in form. When the cookie has run
+// out (30 days) or is no good, `me` answers 401 and the page shows the sign-in form: there is nothing to renew.
 const app = appForPath(window.location.pathname);
 const endpoints = app.kind === 'admin' ? siteAdminEndpoints : memberEndpoints;
-const api = createApiClient({ refreshPath: endpoints.refresh });
+const api = createApiClient();
 const session = createSession(api, endpoints);
 void session.restore();
 

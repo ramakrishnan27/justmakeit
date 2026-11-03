@@ -81,7 +81,7 @@ describe('<Can>', () => {
   });
 
   it('shows nothing to a visitor who is not signed in', async () => {
-    const api = createApiClient({ fetchFn: routedFetch({ 'POST /v1/auth/refresh': () => jsonResponse(401, {}) }) });
+    const api = createApiClient({ fetchFn: routedFetch({ 'GET /v1/auth/me': () => jsonResponse(401, {}) }) });
     const session = createSession(api);
     await session.restore();
 

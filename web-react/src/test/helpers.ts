@@ -1,4 +1,4 @@
-// Shared test doubles: a fake fetch that answers by path and method and records every call, and a JWT builder.
+// Shared test doubles: a fake fetch that answers by path and method and records every call.
 
 import type { FetchFn } from '@/api/client';
 
@@ -37,12 +37,6 @@ export function routedFetch(routes: Record<string, Handler>): RoutedFetch {
   };
 
   return Object.assign(fetchFn, { calls });
-}
-
-/** An unsigned-looking JWT with the given payload, for display tests. */
-export function makeJwt(payload: Record<string, unknown>): string {
-  const encode = (value: unknown) => btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.signature`;
 }
 
 export function requestLine(call: RecordedCall): string {

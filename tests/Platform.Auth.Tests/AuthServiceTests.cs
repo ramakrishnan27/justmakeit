@@ -1,17 +1,14 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Platform.Auth.DTOs;
 using Platform.Auth.Interfaces;
 using Platform.Auth.Models;
 using Platform.Auth.Services;
-using Platform.Auth.Settings;
 using Platform.Auth.Tests.Support;
 using Platform.Helpers.Constants;
 using Platform.Helpers.Exceptions;
 using Platform.Helpers.Tenancy;
-using Platform.Helpers.Utilities;
 using Platform.Infrastructure.Data;
 
 namespace Platform.Auth.Tests;
@@ -23,13 +20,11 @@ public sealed class AuthServiceTests
     private readonly IAccountRepository _accounts = Substitute.For<IAccountRepository>();
     private readonly IMembershipRepository _memberships = Substitute.For<IMembershipRepository>();
     private readonly IAgencyRepository _agencies = Substitute.For<IAgencyRepository>();
-    private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IAccessTokenIssuer _accessTokens = Substitute.For<IAccessTokenIssuer>();
     private readonly IPermissionService _permissions = Substitute.For<IPermissionService>();
     private readonly Pbkdf2PasswordHasher _hasher = new(iterations: 1_000);
     private readonly TenantContext _tenant = new();
     private readonly FixedTimeProvider _time = FixedTimeProvider.Create();
-    private readonly JwtSettings _jwt = new() { SigningKey = new string('k', 32) };
     private readonly AuthService _service;
 
     private readonly Guid _userId = Guid.NewGuid();
@@ -38,16 +33,12 @@ public sealed class AuthServiceTests
     public AuthServiceTests()
     {
         _accessTokens.Issue(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<OrganizationRole>(), Arg.Any<PermissionGrants>())
-            .Returns(call => new AccessToken("access-token", _time.Now.AddMinutes(15)));
+            .Returns(call => new AccessToken("access-token", _time.Now.AddDays(30)));
         _permissions.GetGrantsAsync(Arg.Any<BusinessModel>(), Arg.Any<OrganizationRole>(), Arg.Any<CancellationToken>())
             .Returns(call => new PermissionGrants(7, [$"granted-to-{call.ArgAt<OrganizationRole>(1).ToDb()}"]));
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(true);
-        _refreshTokens.RotateAsync(Arg.Any<Guid>(), Arg.Any<NewRefreshToken>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(true);
 
-        _service = new AuthService(
-            _accounts, _memberships, _agencies, _refreshTokens, _hasher, _accessTokens, _permissions,
-            _tenant, Options.Create(_jwt), _time, NullLogger<AuthService>.Instance);
+        _service = new AuthService(_accounts, _memberships, _agencies, _hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
     }
 
     private static RegisterRequest ValidRegistration(string businessModel = "agency") =>
@@ -70,28 +61,6 @@ public sealed class AuthServiceTests
 
     private void GivenMemberships(params MembershipRecord[] memberships) =>
         _memberships.ListForUserAsync(_userId, Arg.Any<CancellationToken>()).Returns(memberships);
-
-    private RefreshTokenRecord GivenStoredRefreshToken(
-        string rawToken,
-        DateTimeOffset? expiresAt = null,
-        DateTimeOffset? revokedAt = null,
-        Guid? userId = null,
-        Guid? agencyId = null)
-    {
-        var record = new RefreshTokenRecord
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId ?? _userId,
-            AgencyId = agencyId ?? _agencyId,
-            ExpiresAt = expiresAt ?? _time.Now.AddDays(10),
-            RevokedAt = revokedAt
-        };
-        _refreshTokens.FindByHashAsync(HashHelper.Sha256Hex(rawToken), Arg.Any<CancellationToken>()).Returns(record);
-        return record;
-    }
-
-    private void GivenMembership(OrganizationRole role) =>
-        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>()).Returns(Membership(_agencyId, role));
 
     private static async Task<T> AssertThrowsAsync<T>(Func<Task> action) where T : AppException =>
         await Assert.ThrowsAsync<T>(action);
@@ -156,9 +125,17 @@ public sealed class AuthServiceTests
         Assert.Equal(founderRole, created.Role);
         Assert.True(created.BusinessModel.IsAllowed(created.Role));
         _accessTokens.Received(1).Issue(created.UserId, created.AgencyId, founderRole, Arg.Any<PermissionGrants>());
-        Assert.Equal("access-token", result.Tokens.AccessToken);
-        Assert.Equal("Bearer", result.Tokens.TokenType);
-        Assert.Equal(15 * 60, result.Tokens.ExpiresIn);
+        Assert.Equal("access-token", result.AccessToken);
+    }
+
+    [Fact]
+    public async Task Register_ReturnsTheTokenAndWhenItEnds_BothFromTheIssuer()
+    {
+        var result = await _service.RegisterAsync(ValidRegistration(), CancellationToken.None);
+
+        // The expiry is the token's own, so the cookie and the token end together.
+        Assert.Equal("access-token", result.AccessToken);
+        Assert.Equal(_time.Now.AddDays(30), result.ExpiresAt);
     }
 
     [Theory]
@@ -179,32 +156,6 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
-    public async Task Register_StoresOnlyTheHashOfTheRefreshToken_ForTheNewUserAndAgency()
-    {
-        NewAccount? created = null;
-        NewRefreshToken? stored = null;
-        _accounts.CreateAccountAsync(Arg.Do<NewAccount>(account => created = account), Arg.Any<CancellationToken>()).Returns(true);
-        await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
-
-        var result = await _service.RegisterAsync(ValidRegistration(), CancellationToken.None);
-
-        Assert.NotNull(stored);
-        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored.TokenHash);
-        Assert.NotEqual(result.RefreshToken, stored.TokenHash);
-        Assert.Equal(created!.UserId, stored.UserId);
-        Assert.Equal(created.AgencyId, stored.AgencyId);
-    }
-
-    [Fact]
-    public async Task Register_IssuesA32ByteRefreshToken_ThatExpiresAfterTheConfiguredDays()
-    {
-        var result = await _service.RegisterAsync(ValidRegistration(), CancellationToken.None);
-
-        Assert.Equal(43, result.RefreshToken.Length); // 32 random bytes as unpadded base64url
-        Assert.Equal(_time.Now.AddDays(30), result.RefreshTokenExpiresAt);
-    }
-
-    [Fact]
     public async Task Register_WithATakenEmail_ThrowsEmailTaken_AndSignsNobodyIn()
     {
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(false);
@@ -213,7 +164,6 @@ public sealed class AuthServiceTests
             () => _service.RegisterAsync(ValidRegistration(), CancellationToken.None));
 
         Assert.Equal("email_taken", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
         _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
@@ -244,7 +194,7 @@ public sealed class AuthServiceTests
         var result = await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
 
         _accessTokens.Received(1).Issue(_userId, recent, OrganizationRole.MarketingManager, Arg.Any<PermissionGrants>());
-        Assert.Equal("access-token", result.Tokens.AccessToken);
+        Assert.Equal("access-token", result.AccessToken);
         await _memberships.Received(1).TouchAsync(recent, _userId, _time.Now, Arg.Any<CancellationToken>());
     }
 
@@ -270,21 +220,19 @@ public sealed class AuthServiceTests
             _service.LoginAsync(new LoginRequest("ana@example.com", Password, Guid.NewGuid()), CancellationToken.None));
 
         Assert.Equal("not_a_member", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
-    public async Task Login_StoresOnlyTheHashOfTheRefreshToken()
+    public async Task Login_ReturnsTheTokenAndWhenItEnds_BothFromTheIssuer()
     {
-        NewRefreshToken? stored = null;
-        await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
         GivenUser(StoredUser());
         GivenMemberships(Membership(_agencyId, OrganizationRole.OrganizationAdmin));
 
         var result = await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
 
-        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored!.TokenHash);
-        Assert.Equal(_time.Now.AddDays(30), stored.ExpiresAt);
+        Assert.Equal("access-token", result.AccessToken);
+        Assert.Equal(_time.Now.AddDays(30), result.ExpiresAt);
     }
 
     [Fact]
@@ -298,7 +246,7 @@ public sealed class AuthServiceTests
 
         Assert.Equal("invalid_credentials", exception.Code);
         await _memberships.DidNotReceiveWithAnyArgs().ListForUserAsync(default, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -322,9 +270,7 @@ public sealed class AuthServiceTests
     {
         var hasher = Substitute.For<IPasswordHasher>();
         hasher.DummyHash.Returns("pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==");
-        var service = new AuthService(
-            _accounts, _memberships, _agencies, _refreshTokens, hasher, _accessTokens, _permissions,
-            _tenant, Options.Create(_jwt), _time, NullLogger<AuthService>.Instance);
+        var service = new AuthService(_accounts, _memberships, _agencies, hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
         GivenUser(null);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
@@ -400,20 +346,6 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
-    public async Task Refresh_ReadsThePermissionsOfTheModelAndRoleThatAreInTheDatabaseNow()
-    {
-        GivenStoredRefreshToken("token");
-        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>())
-            .Returns(Membership(_agencyId, OrganizationRole.MarketingManager, businessModel: BusinessModel.Company));
-
-        await _service.RefreshAsync("token", CancellationToken.None);
-
-        await _permissions.Received(1).GetGrantsAsync(BusinessModel.Company, OrganizationRole.MarketingManager, Arg.Any<CancellationToken>());
-        _accessTokens.Received(1).Issue(
-            _userId, _agencyId, OrganizationRole.MarketingManager, Arg.Is<PermissionGrants>(g => g.Version == 7));
-    }
-
-    [Fact]
     public async Task SwitchAgency_PutsThePermissionsOfTheTargetsModelAndRoleInTheToken()
     {
         var target = Guid.NewGuid();
@@ -421,24 +353,9 @@ public sealed class AuthServiceTests
         _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>())
             .Returns(Membership(target, OrganizationRole.ContentWriter, businessModel: BusinessModel.Creator));
 
-        await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), null, CancellationToken.None);
+        await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), CancellationToken.None);
 
         await _permissions.Received(1).GetGrantsAsync(BusinessModel.Creator, OrganizationRole.ContentWriter, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Refresh_WhenThePermissionsCannotBeRead_RotatesNothing_SoTheCookieIsNotLost()
-    {
-        GivenStoredRefreshToken("token");
-        GivenMembership(OrganizationRole.ContentWriter);
-        GivenThePermissionsCannotBeRead();
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.RefreshAsync("token", CancellationToken.None));
-
-        // Rotating first would have thrown the browser's cookie away and made the next try look like a stolen token.
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
@@ -453,7 +370,7 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
-    public async Task Login_WhenThePermissionsCannotBeRead_StoresNoRefreshTokenAndTouchesNothing()
+    public async Task Login_WhenThePermissionsCannotBeRead_IssuesNothingAndTouchesNothing()
     {
         GivenUser(StoredUser());
         GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter));
@@ -462,7 +379,6 @@ public sealed class AuthServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None));
 
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
         await _memberships.DidNotReceiveWithAnyArgs().TouchAsync(default, default, default, default);
         _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
@@ -473,260 +389,34 @@ public sealed class AuthServiceTests
         var target = Guid.NewGuid();
         _tenant.Set(_agencyId, _userId, "organizationadmin");
         _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.ClientManager));
-        var current = GivenStoredRefreshToken("current-cookie");
         GivenThePermissionsCannotBeRead();
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), "current-cookie", CancellationToken.None));
+            () => _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), CancellationToken.None));
 
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAsync(default, default, default, default, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
-        Assert.NotNull(current);
+        await _memberships.DidNotReceiveWithAnyArgs().TouchAsync(default, default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     private void GivenThePermissionsCannotBeRead() =>
         _permissions.GetGrantsAsync(Arg.Any<BusinessModel>(), Arg.Any<OrganizationRole>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("The database is not reachable."));
 
-    // --- Refresh -----------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Refresh_RotatesTheToken_RevokingTheOldAndStoringANewOne()
-    {
-        const string presented = "the-presented-token";
-        var record = GivenStoredRefreshToken(presented);
-        GivenMembership(OrganizationRole.ContentWriter);
-        NewRefreshToken? replacement = null;
-        _refreshTokens.RotateAsync(
-                record.Id, Arg.Do<NewRefreshToken>(token => replacement = token), _time.Now, Arg.Any<CancellationToken>())
-            .Returns(true);
-
-        var result = await _service.RefreshAsync(presented, CancellationToken.None);
-
-        Assert.NotNull(replacement);
-        Assert.NotEqual(presented, result.RefreshToken);
-        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), replacement.TokenHash);
-        Assert.Equal(_userId, replacement.UserId);
-        Assert.Equal(_agencyId, replacement.AgencyId);
-        Assert.Equal(_time.Now.AddDays(30), result.RefreshTokenExpiresAt);
-        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ContentWriter, Arg.Any<PermissionGrants>());
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
-    }
-
-    [Fact]
-    public async Task Refresh_LooksTheTokenUpByItsHash_NeverByItsValue()
-    {
-        const string presented = "the-presented-token";
-        GivenStoredRefreshToken(presented);
-        GivenMembership(OrganizationRole.OrganizationAdmin);
-
-        await _service.RefreshAsync(presented, CancellationToken.None);
-
-        await _refreshTokens.Received(1).FindByHashAsync(HashHelper.Sha256Hex(presented), Arg.Any<CancellationToken>());
-        await _refreshTokens.DidNotReceive().FindByHashAsync(presented, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Refresh_TakesTheRoleFromTheDatabase_SoAChangedRoleAppliesAtOnce()
-    {
-        GivenStoredRefreshToken("token");
-        GivenMembership(OrganizationRole.ClientManager);
-
-        await _service.RefreshAsync("token", CancellationToken.None);
-
-        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ClientManager, Arg.Any<PermissionGrants>());
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task Refresh_WithoutAToken_IsUnauthorized_WithoutHittingTheDatabase(string? token)
-    {
-        var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync(token, CancellationToken.None));
-
-        Assert.Equal("invalid_refresh_token", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().FindByHashAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task Refresh_WithAnOversizedToken_IsUnauthorized_WithoutHittingTheDatabase()
-    {
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync(new string('a', 5_000), CancellationToken.None));
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().FindByHashAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task Refresh_WithAnUnknownToken_IsUnauthorized_AndRotatesNothing()
-    {
-        _refreshTokens.FindByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((RefreshTokenRecord?)null);
-
-        var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("unknown", CancellationToken.None));
-
-        Assert.Equal("invalid_refresh_token", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
-    }
-
-    [Fact]
-    public async Task Refresh_WithAnExpiredToken_IsUnauthorized_AndRotatesNothing()
-    {
-        GivenStoredRefreshToken("expired", expiresAt: _time.Now.AddSeconds(-1));
-        GivenMembership(OrganizationRole.OrganizationAdmin);
-
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("expired", CancellationToken.None));
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
-    }
-
-    [Fact]
-    public async Task Refresh_WithATokenExpiringExactlyNow_IsUnauthorized()
-    {
-        GivenStoredRefreshToken("edge", expiresAt: _time.Now);
-        GivenMembership(OrganizationRole.OrganizationAdmin);
-
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("edge", CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task Refresh_WithARevokedToken_IsReuse_AndRevokesEveryTokenOfThatUserForThatAgency()
-    {
-        GivenStoredRefreshToken("stolen", revokedAt: _time.Now.AddMinutes(-5));
-        GivenMembership(OrganizationRole.OrganizationAdmin);
-
-        var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("stolen", CancellationToken.None));
-
-        Assert.Equal("invalid_refresh_token", exception.Code);
-        await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
-    }
-
-    [Fact]
-    public async Task Refresh_ReuseOfARevokedExpiredToken_IsStillDetected()
-    {
-        GivenStoredRefreshToken("old", expiresAt: _time.Now.AddDays(-1), revokedAt: _time.Now.AddDays(-2));
-
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("old", CancellationToken.None));
-
-        await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Refresh_WhenTwoRequestsRaceForTheSameToken_TheLoserIsTreatedAsReuse()
-    {
-        var record = GivenStoredRefreshToken("raced");
-        GivenMembership(OrganizationRole.OrganizationAdmin);
-        _refreshTokens.RotateAsync(record.Id, Arg.Any<NewRefreshToken>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(false);
-
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("raced", CancellationToken.None));
-
-        await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
-        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
-    }
-
-    [Fact]
-    public async Task Refresh_AfterTheMembershipEnded_IsUnauthorized_AndEndsTheUsersSessionsThere()
-    {
-        GivenStoredRefreshToken("ex-member");
-        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>()).Returns((MembershipRecord?)null);
-
-        await Assert.ThrowsAsync<UnauthorizedException>(() => _service.RefreshAsync("ex-member", CancellationToken.None));
-
-        await _refreshTokens.Received(1).RevokeAllAsync(_agencyId, _userId, _time.Now, Arg.Any<CancellationToken>());
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RotateAsync(default, default!, default, default);
-    }
-
-    // --- Logout ------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Logout_RevokesTheTokenItWasGiven()
-    {
-        var record = GivenStoredRefreshToken("leaving");
-
-        await _service.LogoutAsync("leaving", CancellationToken.None);
-
-        await _refreshTokens.Received(1).RevokeAsync(_agencyId, _userId, record.Id, _time.Now, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Logout_WithAnUnknownToken_DoesNothingAndDoesNotFail()
-    {
-        _refreshTokens.FindByHashAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((RefreshTokenRecord?)null);
-
-        await _service.LogoutAsync("unknown", CancellationToken.None);
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAsync(default, default, default, default, default);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public async Task Logout_WithoutAToken_DoesNothingAndDoesNotFail(string? token)
-    {
-        await _service.LogoutAsync(token, CancellationToken.None);
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().FindByHashAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task Logout_WithAnAlreadyRevokedToken_DoesNotTriggerReuseDetection()
-    {
-        GivenStoredRefreshToken("again", revokedAt: _time.Now.AddMinutes(-1));
-
-        await _service.LogoutAsync("again", CancellationToken.None);
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAllAsync(default, default, default, default);
-    }
-
     // --- Switch agency -----------------------------------------------------------------------
 
     [Fact]
-    public async Task SwitchAgency_ToAnAgencyTheUserBelongsTo_IssuesTokensWithThatRole()
+    public async Task SwitchAgency_ToAnAgencyTheUserBelongsTo_IssuesATokenWithThatRole()
     {
         var target = Guid.NewGuid();
         _tenant.Set(_agencyId, _userId, "organizationadmin");
         _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.ClientManager));
 
-        var result = await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), null, CancellationToken.None);
+        var result = await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), CancellationToken.None);
 
         _accessTokens.Received(1).Issue(_userId, target, OrganizationRole.ClientManager, Arg.Any<PermissionGrants>());
-        Assert.Equal("access-token", result.Tokens.AccessToken);
+        Assert.Equal("access-token", result.AccessToken);
+        Assert.Equal(_time.Now.AddDays(30), result.ExpiresAt);
         await _memberships.Received(1).TouchAsync(target, _userId, _time.Now, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task SwitchAgency_StoresANewRefreshTokenForTheTargetAgency_AndRevokesTheOldOne()
-    {
-        var target = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
-        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.MarketingManager));
-        var current = GivenStoredRefreshToken("current-cookie");
-        NewRefreshToken? stored = null;
-        await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
-
-        var result = await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), "current-cookie", CancellationToken.None);
-
-        Assert.Equal(target, stored!.AgencyId);
-        Assert.Equal(_userId, stored.UserId);
-        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored.TokenHash);
-        await _refreshTokens.Received(1).RevokeAsync(_agencyId, _userId, current.Id, _time.Now, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task SwitchAgency_NeverRevokesAnotherUsersRefreshToken()
-    {
-        var target = Guid.NewGuid();
-        _tenant.Set(_agencyId, _userId, "organizationadmin");
-        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.MarketingManager));
-        GivenStoredRefreshToken("someone-elses", userId: Guid.NewGuid());
-
-        await _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), "someone-elses", CancellationToken.None);
-
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAsync(default, default, default, default, default);
     }
 
     [Fact]
@@ -736,18 +426,17 @@ public sealed class AuthServiceTests
         _memberships.FindAsync(_userId, Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns((MembershipRecord?)null);
 
         var exception = await AssertThrowsAsync<ForbiddenException>(() =>
-            _service.SwitchAgencyAsync(new SwitchAgencyRequest(Guid.NewGuid()), "cookie", CancellationToken.None));
+            _service.SwitchAgencyAsync(new SwitchAgencyRequest(Guid.NewGuid()), CancellationToken.None));
 
         Assert.Equal("not_a_member", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().RevokeAsync(default, default, default, default, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Fact]
     public async Task SwitchAgency_WithoutASignedInUser_IsUnauthorized()
     {
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            _service.SwitchAgencyAsync(new SwitchAgencyRequest(Guid.NewGuid()), null, CancellationToken.None));
+            _service.SwitchAgencyAsync(new SwitchAgencyRequest(Guid.NewGuid()), CancellationToken.None));
     }
 
     [Theory]
@@ -758,7 +447,7 @@ public sealed class AuthServiceTests
         _tenant.Set(_agencyId, _userId, "organizationadmin");
 
         await Assert.ThrowsAsync<BadRequestException>(() =>
-            _service.SwitchAgencyAsync(new SwitchAgencyRequest(emptyGuid ? Guid.Empty : null), null, CancellationToken.None));
+            _service.SwitchAgencyAsync(new SwitchAgencyRequest(emptyGuid ? Guid.Empty : null), CancellationToken.None));
     }
 
     // --- Me ----------------------------------------------------------------------------------
@@ -844,7 +533,6 @@ public sealed class AuthServiceTests
 
         Assert.Equal("invalid_credentials", exception.Code);
         _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
     }
 
     // --- RegisterExternal --------------------------------------------------------------------
@@ -875,19 +563,16 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
-    public async Task RegisterExternal_SignsTheFounderIn_WithTheFounderRoleToken_AndOnlyTheHashOfTheRefreshToken()
+    public async Task RegisterExternal_SignsTheFounderIn_WithTheFounderRoleToken()
     {
         NewAccount? created = null;
-        NewRefreshToken? stored = null;
         _accounts.CreateAccountAsync(Arg.Do<NewAccount>(account => created = account), Arg.Any<CancellationToken>()).Returns(true);
-        await _refreshTokens.InsertAsync(Arg.Do<NewRefreshToken>(token => stored = token), Arg.Any<CancellationToken>());
 
         var result = await _service.RegisterExternalAsync(GoogleRegistration(BusinessModel.Creator), CancellationToken.None);
 
         _accessTokens.Received(1).Issue(created!.UserId, created.AgencyId, OrganizationRole.ContentWriter, Arg.Any<PermissionGrants>());
-        Assert.Equal("access-token", result.Tokens.AccessToken);
-        Assert.Equal(HashHelper.Sha256Hex(result.RefreshToken), stored!.TokenHash);
-        Assert.NotEqual(result.RefreshToken, stored.TokenHash);
+        Assert.Equal("access-token", result.AccessToken);
+        Assert.Equal(_time.Now.AddDays(30), result.ExpiresAt);
     }
 
     [Fact]
@@ -898,7 +583,7 @@ public sealed class AuthServiceTests
         var exception = await AssertThrowsAsync<ConflictException>(() => _service.RegisterExternalAsync(GoogleRegistration(), CancellationToken.None));
 
         Assert.Equal("email_taken", exception.Code);
-        await _refreshTokens.DidNotReceiveWithAnyArgs().InsertAsync(default!, default);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
     }
 
     [Theory]

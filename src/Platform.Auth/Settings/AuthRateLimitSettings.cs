@@ -11,7 +11,7 @@ public sealed class AuthRateLimitSettings
     /// <summary>Register and login requests allowed per window and address.</summary>
     public int CredentialRequestsPerWindow { get; set; } = 10;
 
-    /// <summary>Refresh, logout, switch-agency and me requests allowed per window and address.</summary>
+    /// <summary>Logout, switch-agency, me and the other session requests allowed per window and address.</summary>
     public int SessionRequestsPerWindow { get; set; } = 60;
 
     public int WindowSeconds { get; set; } = 60;

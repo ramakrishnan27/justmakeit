@@ -27,14 +27,9 @@ public sealed class JwtSettingsValidator : IValidateOptions<JwtSettings>
             return ValidateOptionsResult.Fail("Jwt:Issuer and Jwt:Audience must not be empty.");
         }
 
-        if (options.AccessTokenMinutes is < 1 or > 60)
+        if (options.AccessTokenDays is < 1 or > 90)
         {
-            return ValidateOptionsResult.Fail("Jwt:AccessTokenMinutes must be between 1 and 60.");
-        }
-
-        if (options.RefreshTokenDays is < 1 or > 90)
-        {
-            return ValidateOptionsResult.Fail("Jwt:RefreshTokenDays must be between 1 and 90.");
+            return ValidateOptionsResult.Fail("Jwt:AccessTokenDays must be between 1 and 90.");
         }
 
         return ValidateOptionsResult.Success;

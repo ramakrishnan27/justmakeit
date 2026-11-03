@@ -76,46 +76,34 @@ public sealed class JwtSettingsValidatorTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(-5)]
-    [InlineData(61)]
-    public void Validate_AccessTokenLifetimeOutsideOneToSixtyMinutes_Fails(int minutes)
-    {
-        var settings = ValidSettings();
-        settings.AccessTokenMinutes = minutes;
-
-        Assert.True(Validator.Validate(null, settings).Failed);
-    }
-
-    [Theory]
-    [InlineData(0)]
     [InlineData(-1)]
     [InlineData(91)]
-    public void Validate_RefreshTokenLifetimeOutsideOneToNinetyDays_Fails(int days)
+    public void Validate_AccessTokenLifetimeOutsideOneToNinetyDays_Fails(int days)
     {
         var settings = ValidSettings();
-        settings.RefreshTokenDays = days;
+        settings.AccessTokenDays = days;
 
         var result = Validator.Validate(null, settings);
 
         Assert.True(result.Failed);
-        Assert.Contains("Jwt:RefreshTokenDays", result.FailureMessage);
+        Assert.Contains("Jwt:AccessTokenDays", result.FailureMessage);
     }
 
     [Theory]
     [InlineData(1)]
+    [InlineData(30)]
     [InlineData(90)]
-    public void Validate_RefreshTokenLifetimeAtTheLimits_Succeeds(int days)
+    public void Validate_AccessTokenLifetimeWithinTheLimits_Succeeds(int days)
     {
         var settings = ValidSettings();
-        settings.RefreshTokenDays = days;
+        settings.AccessTokenDays = days;
 
         Assert.True(Validator.Validate(null, settings).Succeeded);
     }
 
     [Fact]
-    public void Defaults_AreFifteenMinutesAndThirtyDays()
+    public void Default_IsThirtyDays()
     {
-        Assert.Equal(15, new JwtSettings().AccessTokenMinutes);
-        Assert.Equal(30, new JwtSettings().RefreshTokenDays);
+        Assert.Equal(30, new JwtSettings().AccessTokenDays);
     }
 }
