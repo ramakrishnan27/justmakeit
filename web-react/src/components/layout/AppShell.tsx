@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useSignedIn } from '@/session/SessionContext';
 import { AppHeader } from './AppHeader';
-import { SidebarNav } from './SidebarNav';
+import { Menu } from './Menu';
 import { useMediaQuery } from './useMediaQuery';
 
 // The same width where the stylesheet turns the drawer into a fixed column.
 const desktopQuery = '(min-width: 720px)';
 
 /**
- * The frame around every page behind sign-in: a header (the organization, the person, sign out), the sidebar the
- * server built for this person, and the page. The sidebar comes from the session, which holds it in memory; the
- * shell never asks the server for it and draws again whenever the session changes.
+ * The frame around every page behind sign-in: a header (the organization, the person, sign out), the sidebar (a
+ * <Menu> of the pages the server built for this person), and the page. The menu comes from the session, which holds it
+ * in memory; the shell never asks the server for it and draws again whenever the session changes. This is the only
+ * place the menu is drawn, and the shell is never drawn for the sign-in and sign-up pages.
  *
  * Narrower than 720 px the sidebar is a drawer: the menu button opens it, and Escape, the Close button, a tap outside
  * it or choosing a link closes it. While it is open the rest of the page is inert, so focus stays inside it.
@@ -63,13 +64,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('keydown', onKeydown);
   }, [drawerOpen]);
 
-  // Choosing a link closes the drawer; the page then moves focus to its own heading.
-  function onNavClick(event: MouseEvent<HTMLElement>) {
-    if (event.target instanceof Element && event.target.closest('a')) {
-      closeDrawer();
-    }
-  }
-
   return (
     <>
       <AppHeader
@@ -81,12 +75,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="shell-body">
         <div className="shell-scrim" hidden={!drawerOpen} onClick={() => closeDrawer({ focusToggle: true })} />
         {/* A closed drawer is off screen and must not be reachable with Tab; an open one holds focus by making the rest inert. */}
-        <nav id="shell-nav" className={`shell-nav${drawerOpen ? ' is-open' : ''}`} aria-label="Main" inert={!wide && !drawerOpen} onClick={onNavClick}>
+        <aside id="shell-nav" className={`shell-nav${drawerOpen ? ' is-open' : ''}`} inert={!wide && !drawerOpen}>
           <button ref={closeButton} className="button button-quiet shell-close" type="button" onClick={() => closeDrawer({ focusToggle: true })}>
             Close menu
           </button>
-          <SidebarNav items={menu} />
-        </nav>
+          {/* Choosing a link closes the drawer; the page then moves focus to its own heading. */}
+          <Menu label="Main" items={menu} onNavigate={() => closeDrawer()} />
+        </aside>
         <main id="main" className="shell-main" inert={drawerOpen}>
           <div className="container page">{children}</div>
         </main>

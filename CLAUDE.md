@@ -483,7 +483,10 @@ Status: the member app is built, tested and checked in a real browser; the Site 
   mounted, makes no request and its code is never downloaded (a test asserts the missing request; a mutation check confirmed the
   tests fail when the guard is removed). Inside a page, `<Can permission|anyOf|allOf fallback>` does the same for one part (the
   add-workspace form needs `workspaces.create`); a rule that asks for nothing, or for an empty list, allows nothing. The sidebar is
-  the list the server sent. A change of permissions (a renewed token) re-renders everything that depends on it, so a page the
+  the reusable `<Menu>` (`components/layout/Menu.tsx`: a navigation landmark with one link per item, the open page marked,
+  an `onNavigate` callback for the drawer) over the list the server sent; only the app shell draws it, and the shell is never
+  drawn for sign-in, sign-up or the not-found page of a visitor (a test checks it), so the admin login will not show it either
+  when it is ported. A change of permissions (a renewed token) re-renders everything that depends on it, so a page the
   person just lost becomes "no access" while they are on it (checked in a real browser after revoking a grant in the database).
   **Role never authorizes**: only permissions do, as on the server; the role only chooses wording (the dashboard's text).
 - Session store: `createSession(api)` is plain TypeScript (testable without React) and React reads it with
@@ -500,7 +503,7 @@ Status: the member app is built, tested and checked in a real browser; the Site 
 - Google sign-in through the dev server: Google sends the person back to the address the request came from, so register
   `http://localhost:5173/v1/auth/google/callback` in Google Cloud Console (or set `Google:RedirectUri`). Still never run against
   real Google credentials.
-- Tests (`npm test`, 166 in 13 files): the API client and session ported from the old suite, wording and roles, the permission
+- Tests (`npm test`, 177 in 14 files): the API client and session ported from the old suite, wording and roles, the permission
   rules, `<Can>`, the route guards and drawer, the sign-in, sign-up, dashboard and workspaces screens, and **contracts with
   the server's own source** (permission keys against `PermissionKeys.cs`, menu icons against `MenuIcons.cs`, page table against
   the seeds in `005_menus_permissions.sql`). `rules.test.ts` ports the old rules: no storage, no markup from strings (including

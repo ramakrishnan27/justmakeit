@@ -49,6 +49,32 @@ describe('the route guards', () => {
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
   });
 
+  it('draws no menu on the sign-in and sign-up pages, nor on the not-found page of a visitor', async () => {
+    const pages = [
+      ['/login', 'Welcome back'],
+      ['/register', 'Create your account'],
+      ['/nothing-here', 'Page not found'],
+    ] as const;
+
+    for (const [path, title] of pages) {
+      const { unmount } = await renderApp(path, visitorServer());
+      await heading(title);
+
+      expect(screen.queryByRole('navigation', { hidden: true }), path).toBeNull();
+      expect(document.getElementById('shell-nav'), path).toBeNull();
+      unmount();
+    }
+  });
+
+  it('draws the menu in the frame of every signed-in page, with the links the server sent', async () => {
+    await renderApp('/dashboard', memberServer());
+    await heading('Welcome, Ana');
+
+    const menu = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(menu).getAllByRole('link').map((link) => link.textContent)).toEqual(['Dashboard', 'Workspaces']);
+    expect(document.getElementById('shell-nav')?.contains(menu)).toBe(true);
+  });
+
   it('returns to the sign-in form after sign-out, and a second visit to a page needs a new sign-in', async () => {
     await renderApp('/dashboard', memberServer());
     await heading('Welcome, Ana');
@@ -152,7 +178,8 @@ describe('components that load by permission', () => {
 });
 
 describe('the drawer on a narrow screen', () => {
-  const nav = () => screen.getByRole('navigation', { name: 'Main', hidden: true });
+  // The drawer: the column the menu sits in. It is what slides in and out and what is inert while closed.
+  const nav = () => document.getElementById('shell-nav')!;
 
   it('keeps the sidebar out of reach while it is closed, and the page in reach', async () => {
     setWideScreen(false);
