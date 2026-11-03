@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { PageTitle } from '@/components/ui/PageTitle';
-import { homePath } from '@/navigation/pages';
+import { useApp } from '@/navigation/AppContext';
 
 /** Shown while the session is being restored from the refresh cookie, before anyone knows whether to show a page or the sign-in form. */
 export function BootScreen() {
@@ -13,6 +13,8 @@ export function BootScreen() {
 
 /** A short page of words and a way home, for the places a signed-in person cannot go. */
 function MessagePage({ title, documentTitle, text }: { title: string; documentTitle: string; text: string }) {
+  const { homePath } = useApp();
+
   return (
     <section>
       <PageTitle documentTitle={documentTitle}>{title}</PageTitle>
@@ -44,6 +46,8 @@ export function NotFoundPage() {
 
 /** The not-found page of a visitor who is not signed in: no frame, and a way to the sign-in form. */
 export function BareNotFoundPage() {
+  const { homePath } = useApp();
+
   return (
     <main id="main" className="auth-page">
       <section className="card auth-card">

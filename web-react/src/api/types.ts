@@ -57,3 +57,40 @@ export interface RegisterDetails {
 export interface Providers {
   google: boolean;
 }
+
+// --- The Site admin's side: a platform-wide account above every organization (SiteController on the server) ---
+
+export interface SiteMeResponse {
+  user: User;
+  /** Always `siteadmin`: it is what the access token's role claim carries. */
+  role: 'siteadmin';
+}
+
+/** Platform totals. */
+export interface SiteOverview {
+  agencies: number;
+  trialAgencies: number;
+  paidAgencies: number;
+  users: number;
+  workspaces: number;
+  memberships: number;
+}
+
+/** One organization as the Site admin sees it. */
+export interface SiteOrganization {
+  id: string;
+  name: string;
+  businessModel: BusinessModel;
+  plan: string;
+  createdAt: string;
+  members: number;
+  workspaces: number;
+}
+
+export interface PagedResult<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}

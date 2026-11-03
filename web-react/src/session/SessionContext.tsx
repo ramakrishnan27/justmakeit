@@ -1,6 +1,6 @@
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import type { ApiClient } from '@/api/client';
-import type { Session, SessionState, SignedInState } from './session';
+import type { AdminState, MemberState, Session, SessionState, SignedInState } from './session';
 
 interface AppServices {
   api: ApiClient;
@@ -38,11 +38,29 @@ export function useSession(): SessionState {
   return useSyncExternalStore(session.subscribe, session.getState);
 }
 
-/** The signed-in session. Only for components below RequireAuth, where being signed in is already settled. */
+/** The signed-in session, of either app. Only for components below RequireAuth, where being signed in is already settled. */
 export function useSignedIn(): SignedInState {
   const state = useSession();
   if (state.status !== 'signedIn') {
     throw new Error('useSignedIn was used while nobody is signed in.');
+  }
+  return state;
+}
+
+/** The signed-in member (a role inside an organization). For the pages of the member app. */
+export function useMember(): MemberState {
+  const state = useSignedIn();
+  if (state.kind !== 'member') {
+    throw new Error('useMember was used outside the member app.');
+  }
+  return state;
+}
+
+/** The signed-in Site admin. For the pages of the Site admin app. */
+export function useSiteAdmin(): AdminState {
+  const state = useSignedIn();
+  if (state.kind !== 'admin') {
+    throw new Error('useSiteAdmin was used outside the Site admin app.');
   }
   return state;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PERMISSIONS } from '@/access/permissions';
 import { readRepositoryFile } from '@/test/repo';
+import { adminPages } from './adminPages';
 import { pages } from './pages';
 
 // The pages a menu may link to are seeded by the database (005_menus_permissions.sql); the pages that exist are the
@@ -16,6 +17,7 @@ const seeded = [...script.matchAll(/\('(member|admin)',\s*'([a-z-]+)',\s*'(\/[^'
   permission: match[4] === 'NULL' ? undefined : match[4]?.slice(1, -1),
 }));
 const seededMember = seeded.filter((page) => page.app === 'member');
+const seededAdmin = seeded.filter((page) => page.app === 'admin');
 
 describe('the pages the database lets a menu link to', () => {
   it('finds them in the seed script', () => {
@@ -44,6 +46,32 @@ describe('the pages the database lets a menu link to', () => {
         `${page.path} is not seeded as a menu page`,
       ).toBe(true);
     }
+  });
+});
+
+describe('the pages of the Site admin app', () => {
+  it('are every page this app has: a page without a seed row could never be put in a menu', () => {
+    for (const page of adminPages) {
+      expect(
+        seededAdmin.some((candidate) => candidate.path === page.path && candidate.key === page.key),
+        `${page.path} is not seeded as a menu page`,
+      ).toBe(true);
+    }
+  });
+
+  it('name no permission, as in the database: the token of a Site admin carries none', () => {
+    expect(seededAdmin.every((page) => page.permission === undefined)).toBe(true);
+  });
+
+  it('lack only the editors that are not ported yet (this list shrinks as they are added to adminPages.ts)', () => {
+    const missing = seededAdmin.filter((page) => !adminPages.some((candidate) => candidate.path === page.path)).map((page) => page.path);
+
+    expect(missing).toEqual(['/admin/menus', '/admin/permissions']);
+  });
+
+  it('have each path and key once', () => {
+    expect(new Set(adminPages.map((page) => page.path)).size).toBe(adminPages.length);
+    expect(new Set(adminPages.map((page) => page.key)).size).toBe(adminPages.length);
   });
 });
 

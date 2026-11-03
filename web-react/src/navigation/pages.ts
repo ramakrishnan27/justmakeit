@@ -34,6 +34,3 @@ export const pages: readonly PageDefinition[] = [
     Component: lazy(() => import('@/features/workspaces/WorkspacesPage')),
   },
 ];
-
-export const homePath = '/dashboard';
-export const loginPath = '/login';

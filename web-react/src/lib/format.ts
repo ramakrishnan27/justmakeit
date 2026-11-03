@@ -42,6 +42,16 @@ export function businessModelLabel(model: string | null | undefined): string {
   return Object.hasOwn(businessModelLabels, model) ? (businessModelLabels[model] ?? model) : model.charAt(0).toUpperCase() + model.slice(1);
 }
 
+/** "1–20 of 45", or "0 results" when there is nothing. */
+export function pageSummary(page: number, pageSize: number, totalCount: number): string {
+  if (!(totalCount > 0)) {
+    return '0 results';
+  }
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, totalCount);
+  return first > totalCount ? `0 of ${formatNumber(totalCount)}` : `${formatNumber(first)}–${formatNumber(last)} of ${formatNumber(totalCount)}`;
+}
+
 /** "1 member" or "3 members". */
 export function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${formatNumber(count)} ${count === 1 ? singular : plural}`;

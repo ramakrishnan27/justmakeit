@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useApp } from '@/navigation/AppContext';
 import { useSignedIn } from '@/session/SessionContext';
 import { AppHeader } from './AppHeader';
 import { Menu } from './Menu';
@@ -20,11 +21,16 @@ const desktopQuery = '(min-width: 720px)';
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { menu } = useSignedIn();
+  const { pagePaths } = useApp();
   const { pathname } = useLocation();
   const wide = useMediaQuery(desktopQuery);
   const [open, setOpen] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+
+  // Only links to pages this app has: the server may list a page that is seeded but not built here yet, and its link would
+  // open "not found".
+  const items = menu.filter((item) => pagePaths.includes(item.path));
 
   // The drawer is a drawer only on a narrow screen. On a wide one the sidebar is always there and nothing is inert.
   const drawerOpen = !wide && open;
@@ -80,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             Close menu
           </button>
           {/* Choosing a link closes the drawer; the page then moves focus to its own heading. */}
-          <Menu label="Main" items={menu} onNavigate={() => closeDrawer()} />
+          <Menu label="Main" items={items} onNavigate={() => closeDrawer()} />
         </aside>
         <main id="main" className="shell-main" inert={drawerOpen}>
           <div className="container page">{children}</div>

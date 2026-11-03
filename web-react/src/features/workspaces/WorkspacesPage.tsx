@@ -4,7 +4,7 @@ import { ErrorNotice, Loading } from '@/components/ui/Notice';
 import { PageTitle } from '@/components/ui/PageTitle';
 import { messageForWorkspacesLoadError } from '@/lib/messages';
 import { allowsSeveralWorkspaces, workspaceWords } from '@/lib/roles';
-import { useSignedIn } from '@/session/SessionContext';
+import { useMember } from '@/session/SessionContext';
 import { AddWorkspaceForm } from './AddWorkspaceForm';
 import { useWorkspaces } from './useWorkspaces';
 import { WorkspaceList } from './WorkspaceList';
@@ -15,7 +15,7 @@ import { WorkspaceList } from './WorkspaceList';
  * workspaces.create permission, in an organization that may have several; the server checks both again.
  */
 export default function WorkspacesPage() {
-  const { organization } = useSignedIn();
+  const { organization } = useMember();
   const words = workspaceWords(organization.businessModel);
   const { state, reload } = useWorkspaces();
 

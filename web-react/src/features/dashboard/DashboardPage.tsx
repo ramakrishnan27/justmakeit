@@ -1,6 +1,6 @@
 import { PageTitle } from '@/components/ui/PageTitle';
 import { roleTitle, workspaceWords } from '@/lib/roles';
-import { useSignedIn } from '@/session/SessionContext';
+import { useMember } from '@/session/SessionContext';
 import { AbilitiesSection } from './AbilitiesSection';
 import { RoleSection } from './RoleSection';
 import { SessionSection } from './SessionSection';
@@ -12,7 +12,7 @@ import { UpcomingSection } from './UpcomingSection';
  * the app shell; the workspaces have a page of their own.
  */
 export default function DashboardPage() {
-  const { user, role, organization, permissions } = useSignedIn();
+  const { user, role, organization, permissions } = useMember();
   const firstName = user.fullName.trim().split(/\s+/)[0] || user.email || 'there';
 
   return (

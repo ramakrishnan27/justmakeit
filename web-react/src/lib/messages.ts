@@ -130,6 +130,20 @@ export function messageForRegisterError(error: unknown): string {
   return offline;
 }
 
+/** What to show when the Site admin dashboard could not be loaded. */
+export function messageForSiteLoadError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'This account is no longer a site admin.';
+    }
+    return 'The dashboard could not be loaded.';
+  }
+  return offline;
+}
+
 /** What to show when the workspaces could not be loaded. */
 export function messageForWorkspacesLoadError(error: unknown): string {
   if (error instanceof ApiError) {

@@ -1,48 +1,14 @@
-import { useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { FormError } from '@/components/ui/Notice';
-import { PasswordField, TextField } from '@/components/ui/fields';
 import { googleLoginPath } from '@/lib/google';
-import { messageForGoogleError, messageForSignInError, validateSignIn } from '@/lib/messages';
-import { useSessionActions } from '@/session/SessionContext';
+import { messageForGoogleError } from '@/lib/messages';
 import { AuthLayout } from './AuthLayout';
 import { useProviders, useReturnedErrorCode } from './hooks';
+import { SignInForm } from './SignInForm';
 
 /** The member sign-in page. Signing in changes the session, and the route guard then moves the page to the dashboard. */
 export default function LoginPage() {
-  const session = useSessionActions();
   const providers = useProviders();
   const returnedCode = useReturnedErrorCode();
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(() => messageForGoogleError(returnedCode));
-  const [submitting, setSubmitting] = useState(false);
-  const emailInput = useRef<HTMLInputElement>(null);
-  const passwordInput = useRef<HTMLInputElement>(null);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-
-    const problem = validateSignIn(email, password);
-    if (problem) {
-      setError(problem.message);
-      (problem.field === 'email' ? emailInput : passwordInput).current?.focus();
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await session.signIn(email.trim(), password);
-    } catch (failure) {
-      setError(messageForSignInError(failure));
-      setPassword('');
-      passwordInput.current?.focus();
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   return (
     <AuthLayout
@@ -70,38 +36,7 @@ export default function LoginPage() {
         ) : null}
       </div>
 
-      <form noValidate aria-busy={submitting} onSubmit={handleSubmit}>
-        <TextField
-          id="email"
-          name="email"
-          label="Email"
-          type="email"
-          autoComplete="username"
-          inputMode="email"
-          autoCapitalize="none"
-          spellCheck={false}
-          required
-          aria-describedby="login-error"
-          ref={emailInput}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <PasswordField
-          id="password"
-          name="password"
-          label="Password"
-          autoComplete="current-password"
-          required
-          aria-describedby="login-error"
-          ref={passwordInput}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <FormError id="login-error" message={error} />
-        <button className="button button-primary button-block" type="submit" disabled={submitting}>
-          {submitting ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+      <SignInForm initialError={messageForGoogleError(returnedCode)} />
     </AuthLayout>
   );
 }

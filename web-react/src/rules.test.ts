@@ -71,8 +71,9 @@ describe('frontend rules', () => {
     expect(drawn).toBeGreaterThan(restored);
   });
 
-  it('keeps the page table the only place that imports a page lazily', () => {
-    expectNone(/\blazy\s*\(/, sources.filter((file) => file !== join(sourceRoot, 'navigation', 'pages.ts')));
+  it('keeps the two page tables the only places that import a page lazily', () => {
+    const tables = [join(sourceRoot, 'navigation', 'pages.ts'), join(sourceRoot, 'navigation', 'adminPages.ts')];
+    expectNone(/\blazy\s*\(/, sources.filter((file) => !tables.includes(file)));
   });
 });
 

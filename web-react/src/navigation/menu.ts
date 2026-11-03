@@ -38,6 +38,15 @@ function parseItem(raw: unknown): MenuItem[] {
 }
 
 /**
+ * The Site admin's sidebar when the server could not send it, so the person can still get around. Only the Site admin
+ * app uses it; a member without a menu has no way to know which pages they may open. The old app's fallback also held
+ * the menu and permission editors, which this app gets when they are ported.
+ */
+export const adminFallbackItems: readonly MenuItem[] = Object.freeze([
+  Object.freeze({ id: 'fallback-dashboard', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/admin' }),
+]);
+
+/**
  * The menu response as the page uses it. An item the page could not draw safely is dropped; permissions that are
  * not text are dropped; anything else missing leaves an empty list.
  */

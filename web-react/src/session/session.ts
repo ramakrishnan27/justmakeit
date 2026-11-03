@@ -5,23 +5,45 @@
 // signs in or the page restores them, and again each time the access token is renewed (which is when a change the
 // Site admin made reaches them). Moving between pages reads the copy in memory, never the server.
 //
+// There are two apps and they never share a session: the member app (a role inside one organization) and the Site
+// admin app (a platform-wide account). Each has its own endpoints and its own refresh cookie, and the page starts the
+// session of the app its address belongs to (see main.tsx).
+//
 // This is a plain store, not a React component, so its rules are tested without a browser. React reads it through
 // useSession() in SessionContext.tsx.
 
 import type { ApiClient } from '@/api/client';
-import type { MeResponse, Membership, Organization, OrganizationRole, RegisterDetails, TokenResponse, User } from '@/api/types';
-import { parseMenu, type Menu, type MenuItem } from '@/navigation/menu';
+import type { MeResponse, Membership, Organization, OrganizationRole, RegisterDetails, SiteMeResponse, TokenResponse, User } from '@/api/types';
+import { adminFallbackItems, parseMenu, type Menu, type MenuItem } from '@/navigation/menu';
 import { decodeJwtPayload } from './jwt';
 
-export interface SignedInState {
-  status: 'signedIn';
+/** A role inside one organization, with the organization (and what kind it is) and every membership of the person. */
+export interface MemberProfile {
+  kind: 'member';
   user: User;
   role: OrganizationRole;
   organization: Organization;
   memberships: Membership[];
+}
+
+/** The platform-wide Site admin: just a user and a role. Their token carries no organization and no permissions. */
+export interface AdminProfile {
+  kind: 'admin';
+  user: User;
+  role: 'siteadmin';
+}
+
+export type Profile = MemberProfile | AdminProfile;
+
+interface Loaded {
+  status: 'signedIn';
   menu: MenuItem[];
   permissions: string[];
 }
+
+export interface MemberState extends MemberProfile, Loaded {}
+export interface AdminState extends AdminProfile, Loaded {}
+export type SignedInState = MemberState | AdminState;
 
 export type SessionState = { status: 'unknown' } | { status: 'signedOut' } | SignedInState;
 
@@ -32,7 +54,7 @@ export interface Session {
   getClaims(): Record<string, unknown> | null;
   /** Signs in. Throws the API's ApiError (for example 401 for a wrong password) and stays signed out. */
   signIn(email: string, password: string): Promise<void>;
-  /** Creates an account and signs in. Throws the API's ApiError (409 when the email is taken). */
+  /** Creates an account and signs in. Only the member app has one. Throws the API's ApiError (409 when the email is taken). */
   register(details: RegisterDetails): Promise<void>;
   /** Called once when the page starts: turns the refresh cookie, if there is one, back into a session. */
   restore(): Promise<boolean>;
@@ -41,18 +63,52 @@ export interface Session {
   signOut(): Promise<void>;
 }
 
-const unknownState: SessionState = { status: 'unknown' };
-const signedOutState: SessionState = { status: 'signedOut' };
+/** What differs between the two apps: where they talk to, and how the answer of `me` becomes a profile. */
+export interface SessionEndpoints {
+  login: string;
+  logout: string;
+  refresh: string;
+  me: string;
+  menu: string;
+  /** Null when the app has no sign-up. */
+  register: string | null;
+  /**
+   * The sidebar to use when the server cannot send one. Null: do not guess. A member without permissions cannot tell
+   * which pages are theirs, so a menu that cannot be read stops the sign-in.
+   */
+  fallbackMenu: readonly MenuItem[] | null;
+  toProfile(me: unknown): Profile;
+}
 
-const endpoints = {
+export const memberEndpoints: SessionEndpoints = {
   login: '/v1/auth/login',
   logout: '/v1/auth/logout',
+  refresh: '/v1/auth/refresh',
   me: '/v1/auth/me',
   menu: '/v1/menu',
   register: '/v1/auth/register',
+  fallbackMenu: null,
+  toProfile: (me) => {
+    const { user, role, agency, memberships } = me as MeResponse;
+    return { kind: 'member', user, role, organization: agency, memberships };
+  },
 };
 
-export function createSession(api: ApiClient): Session {
+export const siteAdminEndpoints: SessionEndpoints = {
+  login: '/v1/site/login',
+  logout: '/v1/site/logout',
+  refresh: '/v1/site/refresh',
+  me: '/v1/site/me',
+  menu: '/v1/site/menu',
+  register: null,
+  fallbackMenu: adminFallbackItems,
+  toProfile: (me) => ({ kind: 'admin', user: (me as SiteMeResponse).user, role: 'siteadmin' }),
+};
+
+const unknownState: SessionState = { status: 'unknown' };
+const signedOutState: SessionState = { status: 'signedOut' };
+
+export function createSession(api: ApiClient, endpoints: SessionEndpoints = memberEndpoints): Session {
   let state: SessionState = unknownState;
   const listeners = new Set<() => void>();
   let reloading: Promise<void> | null = null;
@@ -63,23 +119,28 @@ export function createSession(api: ApiClient): Session {
     listeners.forEach((listener) => listener());
   }
 
-  // Without the permissions the page cannot tell which pages are the person's, so it does not guess:
-  // a menu that cannot be read stops the sign-in.
   async function readMenu(): Promise<Menu> {
     return parseMenu(await api.request(endpoints.menu));
   }
 
+  // The menu a person starts with. The member app has no way to carry on without it; the Site admin app falls back to
+  // the pages it can always show, so a broken menu never locks the Site admin out.
+  async function readMenuToStart(): Promise<Menu> {
+    const { fallbackMenu } = endpoints;
+    try {
+      const menu = await readMenu();
+      return fallbackMenu && menu.items.length === 0 ? { items: [...fallbackMenu], permissions: menu.permissions } : menu;
+    } catch (error) {
+      if (fallbackMenu) {
+        return { items: [...fallbackMenu], permissions: [] };
+      }
+      throw error;
+    }
+  }
+
   async function loadMe() {
-    const [me, menu] = await Promise.all([api.request<MeResponse>(endpoints.me), readMenu()]);
-    setState({
-      status: 'signedIn',
-      user: me.user,
-      role: me.role,
-      organization: me.agency,
-      memberships: me.memberships,
-      menu: menu.items,
-      permissions: menu.permissions,
-    });
+    const [me, menu] = await Promise.all([api.request(endpoints.me), readMenuToStart()]);
+    setState({ status: 'signedIn', ...endpoints.toProfile(me), menu: menu.items, permissions: menu.permissions });
   }
 
   // Sign-in and sign-up both end the same way: an access token in memory, then the user, role and menu from the API.
@@ -102,7 +163,7 @@ export function createSession(api: ApiClient): Session {
     }
     let menu: Menu;
     try {
-      menu = await readMenu();
+      menu = await readMenuToStart();
     } catch {
       return;
     }
@@ -145,6 +206,9 @@ export function createSession(api: ApiClient): Session {
     },
 
     async register(details) {
+      if (!endpoints.register) {
+        throw new Error('This app has no sign-up.');
+      }
       await start(endpoints.register, details);
     },
 

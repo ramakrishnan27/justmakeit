@@ -16,7 +16,7 @@ Instagram, SMS, WhatsApp and YouTube exist as empty stubs so they can be added l
 | Backend | .NET 10, ASP.NET Core Web API, C# 14, nullable on (nullable warnings are errors) |
 | Database | PostgreSQL 16 only. No other database, **no EF Core** |
 | Data access | Dapper over Npgsql, plain SQL in repository classes |
-| Frontend | `web-react/`: React 19, TypeScript (strict), Vite, React Router, plain CSS. No CSS framework, no jQuery. The older vanilla JavaScript app in `web/` stays until `web-react/` has everything it has (the Site admin app is not ported yet) |
+| Frontend | `web-react/`: React 19, TypeScript (strict), Vite, React Router, plain CSS. No CSS framework, no jQuery. The older vanilla JavaScript app in `web/` stays until `web-react/` has everything it has (the Site admin's menu and permission editors are not ported yet) |
 | Auth | HS256 JWT access tokens (15 min, in browser memory only) + rotating refresh tokens (HttpOnly cookie scoped to /v1/auth) |
 | Email sending | `IEmailProvider`: fake provider for development, Amazon SES for production |
 | Tests | xUnit, Testcontainers.PostgreSql, Microsoft.AspNetCore.Mvc.Testing, NSubstitute; frontend: Vitest + React Testing Library (`web-react/`), `node --test` (the older `web/`) |
@@ -32,7 +32,7 @@ JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.exa
 src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
         Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
-web-react/  React frontend (see React frontend in the decisions log): the member app so far
+web-react/  React frontend (see React frontend in the decisions log): the member app, and the Site admin sign-in and dashboard
 web/    older vanilla JavaScript frontend: site admin app, and the member app (sign in, create an account, role dashboard)
 ```
 
@@ -176,7 +176,7 @@ or was skipped, and any open question.
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do. **The frontend is being rebuilt in React** (`web-react/`, see React frontend): the member app is there, the Site admin app is next, then `web/` can go |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do. **The frontend is being rebuilt in React** (`web-react/`, see React frontend): the member app and the Site admin sign-in and dashboard are there, the Site admin's menu and permission editors are next, then `web/` can go |
 | 7 | Frontend email screens (in `web-react/`) |
 | 8 | CI, README, seed data, security review |
 
@@ -463,7 +463,7 @@ a build order; the starred steps (3, 5, 7) stop for approval.
 
 **React frontend (requested by the user: "create new React application for front, I don't want to use the existing plain
 JavaScript frontend; everything should be component based, and based on the user's role permissions components will load").
-Status: the member app is built, tested and checked in a real browser; the Site admin app is not ported yet.**
+Status: the member app and the Site admin sign-in and dashboard are built, tested and checked in a real browser; the Site admin's menu and permission editors are not ported yet.**
 - Choices made by the user: **TypeScript** (over plain JavaScript), and **the member app plus the permission system first**,
   with the Site admin app (login, dashboard, menu editor, permission editor) as the next step. This **replaces two rules** that
   said "vanilla JavaScript, no framework, no build step": React 19, Vite and TypeScript are now the frontend stack, and the "Do
@@ -485,25 +485,25 @@ Status: the member app is built, tested and checked in a real browser; the Site 
   add-workspace form needs `workspaces.create`); a rule that asks for nothing, or for an empty list, allows nothing. The sidebar is
   the reusable `<Menu>` (`components/layout/Menu.tsx`: a navigation landmark with one link per item, the open page marked,
   an `onNavigate` callback for the drawer) over the list the server sent; only the app shell draws it, and the shell is never
-  drawn for sign-in, sign-up or the not-found page of a visitor (a test checks it), so the admin login will not show it either
-  when it is ported. A change of permissions (a renewed token) re-renders everything that depends on it, so a page the
+  drawn for sign-in, sign-up or the not-found page of a visitor (a test checks it), and neither does the Site admin
+  sign-in page. A change of permissions (a renewed token) re-renders everything that depends on it, so a page the
   person just lost becomes "no access" while they are on it (checked in a real browser after revoking a grant in the database).
   **Role never authorizes**: only permissions do, as on the server; the role only chooses wording (the dashboard's text).
 - Session store: `createSession(api)` is plain TypeScript (testable without React) and React reads it with
   `useSyncExternalStore`. `restore()` shares one attempt between overlapping callers (the refresh token rotates), and
   `main.tsx` starts it before drawing, so the routes show a loading line until the status is known and a page is never drawn
-  and then replaced by the sign-in form. Member app only for now; the Site admin session will need its own endpoints and state.
+  and then replaced by the sign-in form. The Site admin app has its own session over the same store (see Site admin sign-in and dashboard).
 - Dev and production. `npm run dev` serves on 5173 and forwards `/v1` to the API (5080, or `VITE_API_TARGET`), so page and API
   share one origin and the Secure, HttpOnly refresh cookie behaves as in production (Chrome and Firefox). The strict CSP
   (own origin only, no inline script or style) is added to the **built** page only, because the dev server needs an inline script;
   `rules.test.ts` checks the policy and that the page has no inline script, style or handler. The API can serve the build
   without a code change (`Web:RootPath` = `web-react/dist`; it answers `/login`, `/register`, `/dashboard`, `/workspaces` with
-  the page, as before), but **do not switch it until the Site admin app is ported**, or `/admin` would show "not found". An
+  the page, as before), but **do not switch it until the Site admin's menu and permission editors are ported**, or `/admin/menus` and `/admin/permissions` would show "not found" (`/admin/login` and `/admin` work in the React app already). An
   unknown address typed into the address bar is still answered by the server (401 when signed out), not by the app, as before.
 - Google sign-in through the dev server: Google sends the person back to the address the request came from, so register
   `http://localhost:5173/v1/auth/google/callback` in Google Cloud Console (or set `Google:RedirectUri`). Still never run against
   real Google credentials.
-- Tests (`npm test`, 177 in 14 files): the API client and session ported from the old suite, wording and roles, the permission
+- Tests (`npm test`, 218 in 16 files): the API client and session ported from the old suite, wording and roles, the permission
   rules, `<Can>`, the route guards and drawer, the sign-in, sign-up, dashboard and workspaces screens, and **contracts with
   the server's own source** (permission keys against `PermissionKeys.cs`, menu icons against `MenuIcons.cs`, page table against
   the seeds in `005_menus_permissions.sql`). `rules.test.ts` ports the old rules: no storage, no markup from strings (including
@@ -514,5 +514,41 @@ Status: the member app is built, tested and checked in a real browser; the Site 
   workspace, in-app "not found", the drawer at 360 px (open, Escape), no horizontal scroll, sign-out, wrong password, and a
   permission revoked in the database reaching the open app (page turns into "no access", link leaves the sidebar). No script or
   CSP errors; the only console entries are the expected 401 and 403 answers.
-- Not built: the Site admin app, the organization switcher, invitations, linking Google to an existing account. The legacy
+- Not built: the Site admin's menu and permission editors, the organization switcher, invitations, linking Google to an existing account. The legacy
   `web/` app and its tests are unchanged (291 tests still pass).
+
+**Site admin sign-in and dashboard in React (requested by the user: "admin login page is missing", after the Menu component was
+added "but not in admin login"). Status: built, tested and checked in a real browser. The menu and permission editors are next.**
+- Scope chosen: the login page (`/admin/login`) and the page it leads to (`/admin`, the dashboard), so signing in goes
+  somewhere and the menu rule is visible. The two editors (`/admin/menus`, `/admin/permissions`) stay in `web/` for now.
+- **Two apps, one bundle.** `navigation/apps.ts` defines the member app and the Site admin app (name, home and sign-in
+  addresses, the pages behind sign-in); `appForPath` gives `/admin` and everything under it to the Site admin app and the rest to
+  the member app (`/administrator` is the member app). `main.tsx` picks the app from the address the page was opened at and
+  starts **that app's own API client and session**: different endpoints (`/v1/site/*`) and a different refresh cookie
+  (`site_refresh_token`, Path=/v1/site), so the apps never see each other's session (checked in a real browser: a signed-in Site
+  admin asking for `/dashboard` gets the member sign-in page, and the Site admin stays signed in). `AppProvider`/`useApp()` tell
+  the guards, the page titles and the shell which app they are in. Links between the apps are full page loads, never in-app.
+- **Session store.** `createSession(api, endpoints)` takes `memberEndpoints` (default) or `siteAdminEndpoints`. The signed-in
+  state is a union with a `kind`: a member has an organization and memberships, the Site admin is a user and the role
+  `siteadmin` with no organization and no permissions. Pages read it with `useMember()` or `useSiteAdmin()`, which throw in the
+  wrong app. The Site admin has no sign-up, and if its menu cannot be read it gets a fallback (the dashboard link) instead of
+  being locked out; a member whose menu cannot be read still cannot sign in.
+- **Pages.** `navigation/adminPages.ts` is the Site admin's page table (lazy, like the member one) with **no permission**: the
+  token of a Site admin carries none, and the server lets only a Site admin through every `/v1/site` route and checks the database
+  each time. The page is bare: `AdminLoginPage` has no shell, no header, no menu and no sign-up; the dashboard (totals, a page of
+  organizations with paging, the token's claims) is drawn inside the shell. `SignInForm` is shared by the member and the Site
+  admin sign-in pages. Same wording for a wrong password, an unknown email and an account that is not a Site admin, as the
+  server's.
+- **The menu leaves out links to pages the app does not have** (`AppShell` filters the server's list by the app's page paths),
+  so the Site admin's server menu (Dashboard, Menus, Permissions) shows only Dashboard until the editors are ported, and none of
+  its links opens "not found". A test lists the seeded Site admin pages the client still lacks, so it must change as they arrive.
+- Tests added: the Site admin session (ported from the old suite), the two apps and `appForPath`, the Site admin sign-in page
+  (bare, no menu, validation, wrong password, never calls a member endpoint, redirects both ways), its route guards, the shell and
+  the dashboard (totals, list, paging, empty, refresh, error, session card, menu filtering), and the seeded-pages contract for the
+  Site admin. Mutation checks: a menu added to the admin login page, and the link filter removed, both make tests fail.
+- Checked in a real browser (21 checks; the built app served by a throwaway copy of the API with a bootstrap Site admin on a
+  private PostgreSQL cluster): redirect from `/admin` to `/admin/login`, no menu/header/sign-up there, tab named
+  "Sign in · Site admin", wrong password and unknown account (same message), sign-in to the dashboard, header badge, one-link
+  menu, four totals, reload restoring the session, nothing in storage, the member app not seeing the Site admin session, the
+  drawer at 360 px, no horizontal scroll, a signed-in Site admin sent away from the login page, and sign-out. No script or CSP
+  errors; the only console entries are the expected 401 answers.

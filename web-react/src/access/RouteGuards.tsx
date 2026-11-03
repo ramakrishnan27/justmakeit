@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { BareNotFoundPage, BootScreen, ForbiddenPage, NotFoundPage } from '@/features/errors/StatusPages';
-import { homePath, loginPath } from '@/navigation/pages';
+import { useApp } from '@/navigation/AppContext';
 import { useSession } from '@/session/SessionContext';
 import { Can } from './Can';
 import type { PermissionRule } from './permissions';
@@ -13,6 +13,7 @@ import type { PermissionRule } from './permissions';
  */
 export function RequireAuth() {
   const session = useSession();
+  const { loginPath } = useApp();
 
   if (session.status === 'unknown') {
     return <BootScreen />;
@@ -30,6 +31,7 @@ export function RequireAuth() {
 /** A layout route for sign-in and sign-up: a signed-in person has no use for them and goes home. */
 export function GuestOnly() {
   const session = useSession();
+  const { homePath } = useApp();
 
   if (session.status === 'unknown') {
     return <BootScreen />;

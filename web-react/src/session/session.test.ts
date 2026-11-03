@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, createApiClient } from '@/api/client';
 import { jsonResponse, makeJwt, routedFetch, type Handler } from '@/test/helpers';
-import { createSession, type SignedInState } from './session';
+import { createSession, siteAdminEndpoints, type AdminState, type MemberState, type SignedInState } from './session';
 
 const me = {
   user: { id: 'u2', email: 'ana@example.com', fullName: 'Ana Smith' },
@@ -32,6 +32,7 @@ function setup(routes: Record<string, Handler> = {}) {
 
 const countOf = (fetchFn: { calls: { path: string }[] }, path: string) => fetchFn.calls.filter((call) => call.path === path).length;
 const signedIn = (session: ReturnType<typeof createSession>) => session.getState() as SignedInState;
+const asMember = (session: ReturnType<typeof createSession>) => session.getState() as MemberState;
 
 describe('session', () => {
   it('starts with an unknown status', () => {
@@ -48,8 +49,9 @@ describe('session', () => {
       expect(state.status).toBe('signedIn');
       expect(state.role).toBe('marketingmanager');
       expect(state.user).toEqual(me.user);
-      expect(state.organization).toEqual(me.agency);
-      expect(state.memberships).toEqual(me.memberships);
+      expect(state.kind).toBe('member');
+      expect(asMember(session).organization).toEqual(me.agency);
+      expect(asMember(session).memberships).toEqual(me.memberships);
       expect(state.menu).toEqual([dashboard, workspaces]);
       expect(state.permissions).toEqual(bothPermissions);
       expect(api.getAccessToken()).toBe(accessToken);
@@ -124,7 +126,7 @@ describe('session', () => {
 
       expect(await session.restore()).toBe(true);
 
-      expect(signedIn(session).organization.businessModel).toBe('company');
+      expect(asMember(session).organization.businessModel).toBe('company');
     });
 
     it('reads the menu once, not twice: the refresh that restores the session also renews the token, but nobody is signed in yet to reload for', async () => {
@@ -380,5 +382,116 @@ describe('the menu and the permissions in the session', () => {
 
     expect(session.getState().status).toBe('signedOut');
     expect(api.getAccessToken()).toBeNull();
+  });
+});
+
+describe('the Site admin session', () => {
+  const adminMe = { user: { id: 'u1', email: 'root@example.com', fullName: 'Root' }, role: 'siteadmin' };
+  const adminToken = makeJwt({ user_id: 'u1', role: 'siteadmin', exp: 1_900_000_000 });
+  const adminItems = [
+    { id: 'i1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/admin' },
+    { id: 'i2', pageKey: 'menus', label: 'Menus', icon: 'menu', path: '/admin/menus' },
+  ];
+
+  function adminSetup(routes: Record<string, Handler> = {}) {
+    const fetchFn = routedFetch({
+      'POST /v1/site/login': () => jsonResponse(200, { accessToken: adminToken }),
+      'POST /v1/site/refresh': () => jsonResponse(200, { accessToken: adminToken }),
+      'POST /v1/site/logout': () => new Response(null, { status: 204 }),
+      'GET /v1/site/me': () => jsonResponse(200, adminMe),
+      'GET /v1/site/menu': () => jsonResponse(200, { items: adminItems, permissions: [] }),
+      ...routes,
+    });
+    const api = createApiClient({ fetchFn, refreshPath: siteAdminEndpoints.refresh });
+    return { fetchFn, api, session: createSession(api, siteAdminEndpoints) };
+  }
+
+  const asAdmin = (session: ReturnType<typeof createSession>) => session.getState() as AdminState;
+
+  it('signs in through the site endpoints, and is a user and a role with no organization and no permissions', async () => {
+    const { fetchFn, api, session } = adminSetup();
+
+    await session.signIn('root@example.com', 'a password');
+
+    const state = asAdmin(session);
+    expect(state).toMatchObject({ status: 'signedIn', kind: 'admin', role: 'siteadmin', user: adminMe.user, menu: adminItems, permissions: [] });
+    expect('organization' in state).toBe(false);
+    expect(api.getAccessToken()).toBe(adminToken);
+    expect(fetchFn.calls.map((call) => call.path).sort()).toEqual(['/v1/site/login', '/v1/site/me', '/v1/site/menu']);
+  });
+
+  it('restores from the Site admin refresh cookie', async () => {
+    const { fetchFn, session } = adminSetup();
+
+    expect(await session.restore()).toBe(true);
+
+    expect(asAdmin(session).kind).toBe('admin');
+    expect(fetchFn.calls[0]!.path).toBe('/v1/site/refresh');
+  });
+
+  it('never calls the member endpoints: the two apps do not share a session', async () => {
+    const { fetchFn, session } = adminSetup();
+
+    await session.restore();
+    await session.signOut();
+    await session.signIn('root@example.com', 'a password');
+    await session.signOut();
+
+    expect(fetchFn.calls.length).toBeGreaterThan(0);
+    expect(fetchFn.calls.every((call) => call.path.startsWith('/v1/site/'))).toBe(true);
+  });
+
+  it('stays signed out, holding no token, when the credentials are wrong', async () => {
+    const { api, session } = adminSetup({ 'POST /v1/site/login': () => jsonResponse(401, { code: 'invalid_credentials' }) });
+
+    await expect(session.signIn('root@example.com', 'wrong')).rejects.toMatchObject({ status: 401 });
+
+    expect(session.getState().status).not.toBe('signedIn');
+    expect(api.getAccessToken()).toBeNull();
+  });
+
+  it('has no sign-up', async () => {
+    const { session } = adminSetup();
+
+    await expect(session.register({ email: 'a@b.co', password: 'ten chars!!', fullName: null, organizationName: 'X', businessModel: 'company' })).rejects.toThrow(/no sign-up/);
+  });
+
+  it('reads the user id and the role from the token, which names no organization', async () => {
+    const { session } = adminSetup();
+    await session.signIn('root@example.com', 'a password');
+
+    const claims = session.getClaims();
+
+    expect(claims).toMatchObject({ user_id: 'u1', role: 'siteadmin' });
+    expect(claims).not.toHaveProperty('agency_id');
+  });
+
+  it('gives the Site admin the pages it can always show when the menu cannot be had, and signs them in all the same', async () => {
+    const { session } = adminSetup({ 'GET /v1/site/menu': () => jsonResponse(500, {}) });
+
+    await session.signIn('root@example.com', 'a password');
+
+    expect(session.getState().status).toBe('signedIn');
+    expect(signedIn(session).menu.map((item) => item.path)).toEqual(['/admin']);
+    expect(signedIn(session).permissions).toEqual([]);
+  });
+
+  it('does the same when the menu came back empty', async () => {
+    const { session } = adminSetup({ 'GET /v1/site/menu': () => jsonResponse(200, { items: [], permissions: [] }) });
+
+    await session.signIn('root@example.com', 'a password');
+
+    expect(signedIn(session).menu).toHaveLength(1);
+  });
+
+  it('keeps the fallback list from being changed by anyone who holds the session', async () => {
+    const first = adminSetup({ 'GET /v1/site/menu': () => jsonResponse(500, {}) });
+    await first.session.signIn('root@example.com', 'a password');
+
+    signedIn(first.session).menu.push({ id: 'x', pageKey: '', label: 'Extra', icon: 'home', path: '/extra' });
+
+    const again = adminSetup({ 'GET /v1/site/menu': () => jsonResponse(500, {}) });
+    await again.session.signIn('root@example.com', 'a password');
+    expect(signedIn(again.session).menu).toHaveLength(1);
   });
 });

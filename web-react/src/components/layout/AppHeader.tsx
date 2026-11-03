@@ -4,7 +4,10 @@ import { Badge } from '@/components/ui/Badge';
 import { businessModelLabel } from '@/lib/format';
 import { useSessionActions, useSignedIn } from '@/session/SessionContext';
 
-/** The bar across the top: the menu button (narrow screens), the organization, the person and Sign out. */
+/**
+ * The bar across the top: the menu button (narrow screens), who this is (the organization of a member, "Site admin" for the
+ * platform account), the person and Sign out.
+ */
 export function AppHeader({
   drawerOpen,
   onToggleDrawer,
@@ -17,7 +20,8 @@ export function AppHeader({
   /** True while the drawer is open: the header is out of reach until it is closed. */
   inert: boolean;
 }) {
-  const { user, organization } = useSignedIn();
+  const state = useSignedIn();
+  const { user } = state;
   const session = useSessionActions();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -40,9 +44,15 @@ export function AppHeader({
           <Icon name="menu" />
           <span className="visually-hidden">Menu</span>
         </button>
-        <p className="brand">
-          {organization.name || 'Platform'} <Badge tone="model">{businessModelLabel(organization.businessModel)}</Badge>
-        </p>
+        {state.kind === 'admin' ? (
+          <p className="brand">
+            Platform <Badge tone="accent">Site admin</Badge>
+          </p>
+        ) : (
+          <p className="brand">
+            {state.organization.name || 'Platform'} <Badge tone="model">{businessModelLabel(state.organization.businessModel)}</Badge>
+          </p>
+        )}
         <div className="header-actions">
           <span className="user-email" title={user.email}>
             {user.email}
