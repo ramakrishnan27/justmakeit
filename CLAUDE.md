@@ -16,10 +16,10 @@ Instagram, SMS, WhatsApp and YouTube exist as empty stubs so they can be added l
 | Backend | .NET 10, ASP.NET Core Web API, C# 14, nullable on (nullable warnings are errors) |
 | Database | PostgreSQL 16 only. No other database, **no EF Core** |
 | Data access | Dapper over Npgsql, plain SQL in repository classes |
-| Frontend | Vanilla JavaScript (ES modules, Web Components), HTML, CSS. No framework, no jQuery, no CSS framework, no build step |
+| Frontend | `web-react/`: React 19, TypeScript (strict), Vite, React Router, plain CSS. No CSS framework, no jQuery. The older vanilla JavaScript app in `web/` stays until `web-react/` has everything it has (the Site admin app is not ported yet) |
 | Auth | HS256 JWT access tokens (15 min, in browser memory only) + rotating refresh tokens (HttpOnly cookie scoped to /v1/auth) |
 | Email sending | `IEmailProvider`: fake provider for development, Amazon SES for production |
-| Tests | xUnit, Testcontainers.PostgreSql, Microsoft.AspNetCore.Mvc.Testing, NSubstitute; frontend: `node --test` |
+| Tests | xUnit, Testcontainers.PostgreSql, Microsoft.AspNetCore.Mvc.Testing, NSubstitute; frontend: Vitest + React Testing Library (`web-react/`), `node --test` (the older `web/`) |
 
 Allowed packages: Dapper, Npgsql, Microsoft.AspNetCore.Authentication.JwtBearer, Swashbuckle.AspNetCore, CsvHelper,
 AWSSDK.SimpleEmailV2, and the test packages above (plus Microsoft.NET.Test.Sdk and xunit.runner.visualstudio, which xUnit
@@ -32,7 +32,8 @@ JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.exa
 src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
         Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
-web/    vanilla JavaScript frontend: site admin app, and the member app (sign in, create an account, role dashboard); more in Phases 6-7
+web-react/  React frontend (see React frontend in the decisions log): the member app so far
+web/    older vanilla JavaScript frontend: site admin app, and the member app (sign in, create an account, role dashboard)
 ```
 
 Feature projects (Auth, Email, each channel) share one layout: `Controllers/ DTOs/ Models/ Interfaces/ Services/
@@ -57,7 +58,11 @@ PLATFORM_TEST_POSTGRES="Host=...;Port=...;Username=<superuser>;Password=...;Pool
                                                          # Docker-tagged tests against a throwaway PostgreSQL instead of a container
 docker compose up -d                                     # local PostgreSQL 16 (copy .env.example to .env first)
 dotnet run --project src/Platform.Api                    # http://localhost:5080, Development, applies migrations; opens Swagger (/swagger)
-node --test "web/tests/**/*.test.js"                     # frontend unit tests (Node 22+ takes a glob, not a folder)
+node --test "web/tests/**/*.test.js"                     # unit tests of the older web/ app (Node 22+ takes a glob, not a folder)
+cd web-react && npm install                              # once
+cd web-react && npm run dev                              # http://localhost:5173, forwards /v1 to the API on 5080 (VITE_API_TARGET to change)
+cd web-react && npm test                                 # Vitest: logic, components, and the contracts with the server's source
+cd web-react && npm run build                            # typecheck + production build into web-react/dist (git-ignored)
 ```
 
 Visual Studio keeps `src/Platform.Api/bin` locked while it debugs the API, so a terminal build of the same output fails.
@@ -151,10 +156,10 @@ migrator sets that role's password from this string, so it is configured in one 
 - Tests: every service rule has a unit test; every query on a tenant table has an integration test that connects as
   `app_user` and proves isolation. Tests are independent: one PostgreSQL container per run, a fresh database per test class.
   Tests that need Docker carry `[Trait("Category", "Docker")]`.
-- Frontend: no `innerHTML` with API data; email previews in a sandboxed iframe; 360 px first; every drag action has a tap
-  alternative; tokens only in memory; never queue or send a campaign while offline.
+- Frontend: no `innerHTML` with API data (in React: no `dangerouslySetInnerHTML`); email previews in a sandboxed iframe; 360 px
+  first; every drag action has a tap alternative; tokens only in memory; never queue or send a campaign while offline.
 - Ask before: changing an existing table, adding a package, weakening a security rule.
-- Do not: use EF Core, a frontend framework or JS build tool, edit an applied migration, give `app_user` BYPASSRLS,
+- Do not: use EF Core, a CSS framework or jQuery, a second frontend framework next to React, edit an applied migration, give `app_user` BYPASSRLS,
   commit secrets, write logic in the five channel stubs.
 
 ## Build process
@@ -171,8 +176,8 @@ or was skipped, and any open question.
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do |
-| 7 | Frontend email screens |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do. **The frontend is being rebuilt in React** (`web-react/`, see React frontend): the member app is there, the Site admin app is next, then `web/` can go |
+| 7 | Frontend email screens (in `web-react/`) |
 | 8 | CI, README, seed data, security review |
 
 ## Decisions log
@@ -455,3 +460,56 @@ a build order; the starred steps (3, 5, 7) stop for approval.
   point meant for the page beside the drawer must stay clear of the right edge.
 - Defaults chosen in the plan: both Dashboard items are locked, an item's page cannot be changed (delete and add again), and a
   rename or reorder reaches other people when they next load the page or renew their token, not instantly.
+
+**React frontend (requested by the user: "create new React application for front, I don't want to use the existing plain
+JavaScript frontend; everything should be component based, and based on the user's role permissions components will load").
+Status: the member app is built, tested and checked in a real browser; the Site admin app is not ported yet.**
+- Choices made by the user: **TypeScript** (over plain JavaScript), and **the member app plus the permission system first**,
+  with the Site admin app (login, dashboard, menu editor, permission editor) as the next step. This **replaces two rules** that
+  said "vanilla JavaScript, no framework, no build step": React 19, Vite and TypeScript are now the frontend stack, and the "Do
+  not" list now bans a CSS framework, jQuery and a second framework instead. `web/` is untouched and still what the API serves.
+- New frontend packages (all under `web-react/`, none touch the .NET side): `react`, `react-dom`, `react-router-dom`; dev:
+  `vite`, `@vitejs/plugin-react`, `typescript`, `@types/react`, `@types/react-dom`, `@types/node`, `vitest`, `jsdom`,
+  `@testing-library/react`, `@testing-library/dom`. `npm install` found no vulnerabilities.
+- Layout of `web-react/src`: `api/` (the one client that calls fetch, DTO types), `session/` (the store: token in memory, user,
+  organization, menu, permissions; and the React context over it), `access/` (permission keys, `<Can>`, route guards),
+  `navigation/` (menu parsing, the page table), `components/` (`ui`, `layout`, `icons`), `features/` (`auth`, `dashboard`,
+  `workspaces`, `errors`: one folder per screen, each made of small components), `lib/` (wording, roles, formatting),
+  `test/` (doubles and helpers). Path alias `@/` is `src/`.
+- **How components load by permission.** The session holds the permission list from the access token (as in the old app: read
+  at sign-in or restore, and again whenever a renewed token arrives). `pages.ts` is the table of pages behind sign-in: path,
+  title, the permission the page needs, and a `lazy()` import of its component. `App.tsx` makes one route per row, wrapped in
+  `RequirePermission`, which renders the "no access" page **instead of** the page, so a page the token does not allow is never
+  mounted, makes no request and its code is never downloaded (a test asserts the missing request; a mutation check confirmed the
+  tests fail when the guard is removed). Inside a page, `<Can permission|anyOf|allOf fallback>` does the same for one part (the
+  add-workspace form needs `workspaces.create`); a rule that asks for nothing, or for an empty list, allows nothing. The sidebar is
+  the list the server sent. A change of permissions (a renewed token) re-renders everything that depends on it, so a page the
+  person just lost becomes "no access" while they are on it (checked in a real browser after revoking a grant in the database).
+  **Role never authorizes**: only permissions do, as on the server; the role only chooses wording (the dashboard's text).
+- Session store: `createSession(api)` is plain TypeScript (testable without React) and React reads it with
+  `useSyncExternalStore`. `restore()` shares one attempt between overlapping callers (the refresh token rotates), and
+  `main.tsx` starts it before drawing, so the routes show a loading line until the status is known and a page is never drawn
+  and then replaced by the sign-in form. Member app only for now; the Site admin session will need its own endpoints and state.
+- Dev and production. `npm run dev` serves on 5173 and forwards `/v1` to the API (5080, or `VITE_API_TARGET`), so page and API
+  share one origin and the Secure, HttpOnly refresh cookie behaves as in production (Chrome and Firefox). The strict CSP
+  (own origin only, no inline script or style) is added to the **built** page only, because the dev server needs an inline script;
+  `rules.test.ts` checks the policy and that the page has no inline script, style or handler. The API can serve the build
+  without a code change (`Web:RootPath` = `web-react/dist`; it answers `/login`, `/register`, `/dashboard`, `/workspaces` with
+  the page, as before), but **do not switch it until the Site admin app is ported**, or `/admin` would show "not found". An
+  unknown address typed into the address bar is still answered by the server (401 when signed out), not by the app, as before.
+- Google sign-in through the dev server: Google sends the person back to the address the request came from, so register
+  `http://localhost:5173/v1/auth/google/callback` in Google Cloud Console (or set `Google:RedirectUri`). Still never run against
+  real Google credentials.
+- Tests (`npm test`, 166 in 13 files): the API client and session ported from the old suite, wording and roles, the permission
+  rules, `<Can>`, the route guards and drawer, the sign-in, sign-up, dashboard and workspaces screens, and **contracts with
+  the server's own source** (permission keys against `PermissionKeys.cs`, menu icons against `MenuIcons.cs`, page table against
+  the seeds in `005_menus_permissions.sql`). `rules.test.ts` ports the old rules: no storage, no markup from strings (including
+  `dangerouslySetInnerHTML`), no eval, fetch only in the client, no inline style, `lazy()` only in the page table.
+- Checked in a real browser (headless Edge over the DevTools protocol, real mouse and key events; the built app served by a
+  throwaway copy of the API on a private PostgreSQL cluster, never the development database): redirect to sign-in, sign-up as a
+  company, the dashboard, reload restoring the session from the cookie, nothing in storage, the workspaces page and adding a
+  workspace, in-app "not found", the drawer at 360 px (open, Escape), no horizontal scroll, sign-out, wrong password, and a
+  permission revoked in the database reaching the open app (page turns into "no access", link leaves the sidebar). No script or
+  CSP errors; the only console entries are the expected 401 and 403 answers.
+- Not built: the Site admin app, the organization switcher, invitations, linking Google to an existing account. The legacy
+  `web/` app and its tests are unchanged (291 tests still pass).

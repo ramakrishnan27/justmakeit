@@ -19,3 +19,6 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# React frontend build output
+web-react/dist/
