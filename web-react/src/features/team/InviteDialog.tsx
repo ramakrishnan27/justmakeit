@@ -28,20 +28,21 @@ function InviteForm({
   onBusyChange: (busy: boolean) => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrganizationRole | ''>('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    focusField(form.current, 'email');
+    focusField(form.current, 'fullName');
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
-    const problem = validateInvite(email, role);
+    const problem = validateInvite(fullName, email, role);
     if (problem) {
       setError(problem.message);
       focusField(form.current, problem.field);
@@ -51,7 +52,7 @@ function InviteForm({
     setSubmitting(true);
     onBusyChange(true);
     try {
-      onCreated(await invite(email.trim(), role as OrganizationRole));
+      onCreated(await invite(fullName.trim(), email.trim(), role as OrganizationRole));
     } catch (failure) {
       setError(messageForInviteError(failure));
       setSubmitting(false);
@@ -64,8 +65,22 @@ function InviteForm({
     <form ref={form} noValidate onSubmit={handleSubmit}>
       <h2 id="invite-title">Invite an employee</h2>
       <p className="muted small">
-        No email is sent: you get a link to pass on yourself. The person opens it and chooses their own password.
+        No email is sent: you get a link to pass on yourself, and the person chooses their own password. Or activate them
+        yourself from the list, with a default password.
       </p>
+
+      <TextField
+        id="inviteName"
+        name="fullName"
+        label="Full name"
+        type="text"
+        autoComplete="off"
+        maxLength={200}
+        required
+        aria-describedby="invite-error"
+        value={fullName}
+        onChange={(event) => setFullName(event.target.value)}
+      />
 
       <TextField
         id="inviteEmail"
@@ -143,8 +158,8 @@ function InviteLink({ created, onAnother, onDone }: { created: CreatedInvitation
         Invite link ready
       </h2>
       <p className="muted small">
-        {`Send this link to ${invitation.email}. It lets them join as ${roleTitle(invitation.role)} and works until ${formatDate(invitation.expiresAt)}. `}
-        It is shown only now: if you lose it, cancel the invitation and make a new one.
+        {`Send this link to ${invitation.fullName.length > 0 ? `${invitation.fullName} (${invitation.email})` : invitation.email}. It lets them join as ${roleTitle(invitation.role)} and works until ${formatDate(invitation.expiresAt)}. `}
+        It is shown only now: if you lose it, delete the invitation and make a new one.
       </p>
 
       <div className="field">

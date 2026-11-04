@@ -21,6 +21,7 @@ public sealed class TeamServiceTests
     private readonly ITeamRepository _team = Substitute.For<ITeamRepository>();
     private readonly IAgencyRepository _agencies = Substitute.For<IAgencyRepository>();
     private readonly ISessionRevocationService _revocations = Substitute.For<ISessionRevocationService>();
+    private readonly IPasswordHasher _hasher = Substitute.For<IPasswordHasher>();
     private readonly TenantContext _tenant = new();
     private readonly FixedTimeProvider _time = FixedTimeProvider.Create();
     private readonly InvitationSettings _settings = new() { InvitationDays = 7 };
@@ -33,7 +34,7 @@ public sealed class TeamServiceTests
     {
         GivenBusinessModel(BusinessModel.Agency);
         GivenManager();
-        _service = new TeamService(_team, _agencies, _revocations, _tenant, Options.Create(_settings), _time, NullLogger<TeamService>.Instance);
+        _service = new TeamService(_team, _agencies, _revocations, _hasher, _tenant, Options.Create(_settings), _time, NullLogger<TeamService>.Instance);
     }
 
     private void GivenBusinessModel(BusinessModel model) =>
@@ -61,10 +62,12 @@ public sealed class TeamServiceTests
         Func<Task>[] operations =
         [
             () => _service.GetTeamAsync(CancellationToken.None),
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None),
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None),
             () => _service.RevokeInvitationAsync(someone, CancellationToken.None),
             () => _service.ChangeRoleAsync(someone, new ChangeMemberRoleRequest("contentwriter"), CancellationToken.None),
-            () => _service.RemoveMemberAsync(someone, CancellationToken.None)
+            () => _service.RemoveMemberAsync(someone, CancellationToken.None),
+            () => _service.SetMemberActiveAsync(someone, new SetMemberActiveRequest(false), CancellationToken.None),
+            () => _service.ActivateInvitationAsync(someone, new ActivateInvitationRequest("a default password"), CancellationToken.None)
         ];
 
         foreach (var operation in operations)
@@ -75,6 +78,7 @@ public sealed class TeamServiceTests
 
         Assert.Empty(_team.ReceivedCalls());
         Assert.Empty(_revocations.ReceivedCalls());
+        Assert.Empty(_hasher.ReceivedCalls());
     }
 
     [Fact]
@@ -82,7 +86,7 @@ public sealed class TeamServiceTests
     {
         GivenManager("marketingmanager");
 
-        await _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None);
+        await _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None);
 
         await _team.Received(1).InsertInvitationAsync(Arg.Any<NewInvitation>(), Arg.Any<CancellationToken>());
     }
@@ -94,7 +98,7 @@ public sealed class TeamServiceTests
 
         await Assert.ThrowsAsync<UnauthorizedException>(() => _service.GetTeamAsync(CancellationToken.None));
         await Assert.ThrowsAsync<UnauthorizedException>(
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None));
         Assert.Empty(_team.ReceivedCalls());
     }
 
@@ -107,11 +111,11 @@ public sealed class TeamServiceTests
         _team.ListMembersAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
         [
             new TeamMemberRecord { UserId = _userId, Email = "me@example.com", FullName = "Me", Role = OrganizationRole.OrganizationAdmin, JoinedAt = _time.Now },
-            new TeamMemberRecord { UserId = other, Email = "them@example.com", FullName = "Them", Role = OrganizationRole.ContentWriter, JoinedAt = _time.Now.AddDays(1) }
+            new TeamMemberRecord { UserId = other, Email = "them@example.com", FullName = "Them", Role = OrganizationRole.ContentWriter, JoinedAt = _time.Now.AddDays(1), IsActive = false }
         ]);
         _team.ListPendingInvitationsAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns(
         [
-            new InvitationRecord { Id = Guid.NewGuid(), Email = "live@example.com", Role = OrganizationRole.MarketingManager, CreatedAt = _time.Now, ExpiresAt = _time.Now.AddDays(1) },
+            new InvitationRecord { Id = Guid.NewGuid(), FullName = "Lia Live", Email = "live@example.com", Role = OrganizationRole.MarketingManager, CreatedAt = _time.Now, ExpiresAt = _time.Now.AddDays(1) },
             new InvitationRecord { Id = Guid.NewGuid(), Email = "old@example.com", Role = OrganizationRole.ContentWriter, CreatedAt = _time.Now.AddDays(-8), ExpiresAt = _time.Now.AddDays(-1) }
         ]);
 
@@ -119,6 +123,8 @@ public sealed class TeamServiceTests
 
         Assert.Equal([true, false], team.Members.Select(m => m.IsYou));
         Assert.Equal(["me@example.com", "them@example.com"], team.Members.Select(m => m.Email));
+        Assert.Equal([true, false], team.Members.Select(m => m.IsActive));
+        Assert.Equal(["Lia Live", ""], team.Invitations.Select(i => i.FullName));
         Assert.Equal([false, true], team.Invitations.Select(i => i.IsExpired));
         await _team.Received(1).ListMembersAsync(_agencyId, _userId, Arg.Any<CancellationToken>());
     }
@@ -136,12 +142,13 @@ public sealed class TeamServiceTests
         NewInvitation? stored = null;
         await _team.InsertInvitationAsync(Arg.Do<NewInvitation>(i => stored = i), Arg.Any<CancellationToken>());
 
-        var created = await _service.InviteAsync(new InviteMemberRequest("  New.Person@Example.COM ", role), CancellationToken.None);
+        var created = await _service.InviteAsync(new InviteMemberRequest("Test Person", "  New.Person@Example.COM ", role), CancellationToken.None);
 
         Assert.NotNull(stored);
         Assert.Equal(_agencyId, stored.AgencyId);
         Assert.Equal(_userId, stored.InvitedBy);
         Assert.Equal(model, stored.BusinessModel);
+        Assert.Equal("Test Person", stored.FullName);
         Assert.Equal("new.person@example.com", stored.Email);
         Assert.Equal(role, stored.Role.ToDb());
         Assert.Equal(_time.Now, stored.CreatedAt);
@@ -152,7 +159,7 @@ public sealed class TeamServiceTests
         Assert.Equal(HashHelper.Sha256Hex(created.Token), stored.TokenHash);
         Assert.NotEqual(created.Token, stored.TokenHash);
         Assert.DoesNotContain(created.Token, stored.ToString());
-        Assert.Equal(new InvitationResponse(stored.Id, "new.person@example.com", stored.Role, _time.Now, _time.Now.AddDays(7), IsExpired: false), created.Invitation);
+        Assert.Equal(new InvitationResponse(stored.Id, "Test Person", "new.person@example.com", stored.Role, _time.Now, _time.Now.AddDays(7), IsExpired: false), created.Invitation);
     }
 
     [Fact]
@@ -162,7 +169,7 @@ public sealed class TeamServiceTests
         NewInvitation? stored = null;
         await _team.InsertInvitationAsync(Arg.Do<NewInvitation>(i => stored = i), Arg.Any<CancellationToken>());
 
-        await _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None);
+        await _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None);
 
         Assert.Equal(_time.Now.AddDays(3), stored!.ExpiresAt);
     }
@@ -170,8 +177,8 @@ public sealed class TeamServiceTests
     [Fact]
     public async Task Invite_MakesANewTokenEachTime()
     {
-        var first = await _service.InviteAsync(new InviteMemberRequest("one@example.com", "contentwriter"), CancellationToken.None);
-        var second = await _service.InviteAsync(new InviteMemberRequest("two@example.com", "contentwriter"), CancellationToken.None);
+        var first = await _service.InviteAsync(new InviteMemberRequest("Test Person", "one@example.com", "contentwriter"), CancellationToken.None);
+        var second = await _service.InviteAsync(new InviteMemberRequest("Test Person", "two@example.com", "contentwriter"), CancellationToken.None);
 
         Assert.NotEqual(first.Token, second.Token);
         Assert.NotEqual(first.Invitation.Id, second.Invitation.Id);
@@ -183,7 +190,7 @@ public sealed class TeamServiceTests
         GivenBusinessModel(BusinessModel.Creator);
 
         var exception = await Assert.ThrowsAsync<ConflictException>(
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None));
 
         Assert.Equal("team_not_available", exception.Code);
         await _team.DidNotReceiveWithAnyArgs().InsertInvitationAsync(default!, default);
@@ -196,7 +203,7 @@ public sealed class TeamServiceTests
         GivenBusinessModel(model);
 
         var exception = await Assert.ThrowsAsync<BadRequestException>(
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", role), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", role), CancellationToken.None));
 
         Assert.Contains("role", exception.Errors!.Keys);
         await _team.DidNotReceiveWithAnyArgs().InsertInvitationAsync(default!, default);
@@ -208,7 +215,7 @@ public sealed class TeamServiceTests
         _team.EmailIsRegisteredAsync("taken@example.com", Arg.Any<CancellationToken>()).Returns(true);
 
         var exception = await Assert.ThrowsAsync<ConflictException>(
-            () => _service.InviteAsync(new InviteMemberRequest(" Taken@Example.com ", "contentwriter"), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", " Taken@Example.com ", "contentwriter"), CancellationToken.None));
 
         Assert.Equal("email_taken", exception.Code);
         await _team.DidNotReceiveWithAnyArgs().InsertInvitationAsync(default!, default);
@@ -221,7 +228,7 @@ public sealed class TeamServiceTests
             .Throws(new ConflictException("An invitation for this address is already waiting.", "invitation_exists"));
 
         var exception = await Assert.ThrowsAsync<ConflictException>(
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None));
 
         Assert.Equal("invitation_exists", exception.Code);
     }
@@ -235,7 +242,7 @@ public sealed class TeamServiceTests
     public async Task Invite_WithABadRequest_ReportsTheField_AndStoresNothing(string? email, string? role, string field)
     {
         var exception = await Assert.ThrowsAsync<BadRequestException>(
-            () => _service.InviteAsync(new InviteMemberRequest(email, role), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", email, role), CancellationToken.None));
 
         Assert.Contains(field, exception.Errors!.Keys);
         Assert.Empty(_team.ReceivedCalls());
@@ -247,7 +254,7 @@ public sealed class TeamServiceTests
         _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>()).Returns((AgencyRecord?)null);
 
         var exception = await Assert.ThrowsAsync<UnauthorizedException>(
-            () => _service.InviteAsync(new InviteMemberRequest("new@example.com", "contentwriter"), CancellationToken.None));
+            () => _service.InviteAsync(new InviteMemberRequest("Test Person", "new@example.com", "contentwriter"), CancellationToken.None));
 
         Assert.Equal("membership_ended", exception.Code);
         await _team.DidNotReceiveWithAnyArgs().InsertInvitationAsync(default!, default);
@@ -368,5 +375,130 @@ public sealed class TeamServiceTests
         Assert.Equal("cannot_change_self", exception.Code);
         await _team.DidNotReceiveWithAnyArgs().RemoveMemberAsync(default, default, default, default);
         _revocations.DidNotReceive().Invalidate();
+    }
+
+    // --- Names -------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Invite_WithoutAName_IsABadRequest_BeforeAnythingIsLookedUp(string? name)
+    {
+        var exception = await Assert.ThrowsAsync<BadRequestException>(
+            () => _service.InviteAsync(new InviteMemberRequest(name, "new@example.com", "contentwriter"), CancellationToken.None));
+
+        Assert.Contains("fullName", exception.Errors!.Keys);
+        Assert.Empty(_team.ReceivedCalls());
+    }
+
+    [Fact]
+    public async Task Invite_KeepsTheNameWithoutTheSpaceAroundIt()
+    {
+        NewInvitation? stored = null;
+        await _team.InsertInvitationAsync(Arg.Do<NewInvitation>(i => stored = i), Arg.Any<CancellationToken>());
+
+        await _service.InviteAsync(new InviteMemberRequest("  Ana Smith ", "ana@example.com", "contentwriter"), CancellationToken.None);
+
+        Assert.Equal("Ana Smith", stored!.FullName);
+    }
+
+    // --- Activating an invitation by hand ----------------------------------------------------
+
+    [Fact]
+    public async Task ActivateInvitation_HandsTheRepositoryTheHashOfThePassword_AndNeverThePasswordItself()
+    {
+        var invitation = Guid.NewGuid();
+        _hasher.Hash("a default password").Returns("hash-of-the-password");
+
+        await _service.ActivateInvitationAsync(invitation, new ActivateInvitationRequest("a default password"), CancellationToken.None);
+
+        await _team.Received(1).ActivateInvitationAsync(
+            _agencyId, _userId, invitation, Arg.Is<Guid>(id => id != Guid.Empty && id != _userId), "hash-of-the-password", Arg.Any<CancellationToken>());
+        foreach (var call in _team.ReceivedCalls())
+        {
+            Assert.DoesNotContain("a default password", string.Join("|", call.GetArguments().Select(argument => argument?.ToString())));
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("too short")]
+    public async Task ActivateInvitation_WithAPasswordThatIsNotAllowed_IsABadRequest_AndHashesNothing(string? password)
+    {
+        var exception = await Assert.ThrowsAsync<BadRequestException>(
+            () => _service.ActivateInvitationAsync(Guid.NewGuid(), new ActivateInvitationRequest(password), CancellationToken.None));
+
+        Assert.Contains("password", exception.Errors!.Keys);
+        Assert.Empty(_hasher.ReceivedCalls());
+        Assert.Empty(_team.ReceivedCalls());
+    }
+
+    [Theory]
+    [InlineData("invitation_not_found")]
+    [InlineData("email_taken")]
+    public async Task ActivateInvitation_PassesOnWhatTheDatabaseRefused_AndForgetsWhatIsHeld(string code)
+    {
+        _hasher.Hash(default!).ReturnsForAnyArgs("hash");
+        AppException refusal = code == "email_taken" ? new ConflictException("taken", code) : new NotFoundException("gone", code);
+        _team.ActivateInvitationAsync(default, default, default, default, default!, default).ThrowsForAnyArgs(refusal);
+
+        var exception = await Assert.ThrowsAnyAsync<AppException>(
+            () => _service.ActivateInvitationAsync(Guid.NewGuid(), new ActivateInvitationRequest("a default password"), CancellationToken.None));
+
+        Assert.Same(refusal, exception);
+        _revocations.Received(1).Invalidate();
+    }
+
+    // --- Deactivating and activating a member -------------------------------------------------
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetMemberActive_PassesTheStateOn_AndMakesTheChangeVisibleAtOnce(bool isActive)
+    {
+        var member = Guid.NewGuid();
+
+        await _service.SetMemberActiveAsync(member, new SetMemberActiveRequest(isActive), CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _team.SetMemberActiveAsync(_agencyId, _userId, member, isActive, Arg.Any<CancellationToken>());
+            _revocations.Invalidate();
+        });
+    }
+
+    [Fact]
+    public async Task SetMemberActive_ForgetsWhatIsHeldEvenWhenTheAttemptFailed()
+    {
+        _team.SetMemberActiveAsync(default, default, default, default, default)
+            .ThrowsForAnyArgs(new ConflictException("An organization needs at least one active organization admin.", "last_organization_admin"));
+
+        var exception = await Assert.ThrowsAsync<ConflictException>(
+            () => _service.SetMemberActiveAsync(Guid.NewGuid(), new SetMemberActiveRequest(false), CancellationToken.None));
+
+        Assert.Equal("last_organization_admin", exception.Code);
+        _revocations.Received(1).Invalidate();
+    }
+
+    [Fact]
+    public async Task SetMemberActive_OfYourself_IsAConflict_WithoutAskingTheDatabase()
+    {
+        var exception = await Assert.ThrowsAsync<ConflictException>(
+            () => _service.SetMemberActiveAsync(_userId, new SetMemberActiveRequest(false), CancellationToken.None));
+
+        Assert.Equal("cannot_change_self", exception.Code);
+        await _team.DidNotReceiveWithAnyArgs().SetMemberActiveAsync(default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task SetMemberActive_WithoutSayingWhich_IsABadRequest()
+    {
+        var exception = await Assert.ThrowsAsync<BadRequestException>(
+            () => _service.SetMemberActiveAsync(Guid.NewGuid(), new SetMemberActiveRequest(null), CancellationToken.None));
+
+        Assert.Contains("isActive", exception.Errors!.Keys);
+        Assert.Empty(_team.ReceivedCalls());
     }
 }

@@ -10,7 +10,7 @@ namespace Platform.Auth.Repositories;
 
 /// <summary>
 /// Finding and accepting an invitation, before anybody is signed in. Both are SECURITY DEFINER functions of
-/// <c>007_team_members.sql</c> that match one exact token hash and return only what the page needs.
+/// <c>007_team_members.sql</c> and <c>008_team_admin.sql</c> that match one exact token hash and return only what the page needs.
 /// </summary>
 public sealed class InvitationRepository(IDbConnectionFactory connections) : IInvitationRepository
 {
@@ -20,7 +20,7 @@ public sealed class InvitationRepository(IDbConnectionFactory connections) : IIn
     {
         await using var connection = await connections.OpenAsync(null, null, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<InvitationPreviewRecord>(new CommandDefinition(
-            "SELECT id, agency_id, organization_name, business_model, email, role, expires_at FROM invitation_find(@tokenHash)",
+            "SELECT id, agency_id, organization_name, business_model, email, role, expires_at, coalesce(full_name, '') AS full_name FROM invitation_find_v2(@tokenHash)",
             new { tokenHash },
             cancellationToken: cancellationToken));
     }

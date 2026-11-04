@@ -10,7 +10,7 @@ namespace Platform.Auth.Repositories;
 
 /// <summary>
 /// The team of an organization. Listing, changing and removing people go through the <c>team_*</c> SECURITY DEFINER
-/// functions of <c>007_team_members.sql</c>, which check inside the database that the caller holds
+/// functions of <c>007_team_members.sql</c> and <c>008_team_admin.sql</c> (the <c>_v2</c> ones are what the API calls), which check inside the database that the caller holds
 /// <c>members.manage</c> in the organization the connection acts for; invitations are plain rows under row-level
 /// security, like any other tenant table.
 /// </summary>
@@ -18,6 +18,7 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
 {
     private const string PendingInvitationIndex = "ux_member_invitations_pending";
     private const string RoleModelCheck = "ck_agency_members_role_model";
+    private const string UniqueEmailIndex = "ux_users_email";
 
     public async Task<IReadOnlyList<TeamMemberRecord>> ListMembersAsync(Guid agencyId, Guid userId, CancellationToken cancellationToken)
     {
@@ -25,7 +26,7 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
         try
         {
             var rows = await connection.QueryAsync<TeamMemberRecord>(new CommandDefinition(
-                "SELECT user_id, email, full_name, role, joined_at FROM team_list_members()",
+                "SELECT user_id, email, full_name, role, joined_at, is_active FROM team_members_v2()",
                 cancellationToken: cancellationToken));
             return rows.AsList();
         }
@@ -41,7 +42,7 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
         await using var connection = await connections.OpenAsync(agencyId, userId, cancellationToken);
         var rows = await connection.QueryAsync<InvitationRecord>(new CommandDefinition(
             """
-            SELECT id, email, role, created_at, expires_at
+            SELECT id, coalesce(full_name, '') AS full_name, email, role, created_at, expires_at
             FROM member_invitations
             WHERE agency_id = @agencyId AND accepted_at IS NULL AND revoked_at IS NULL
             ORDER BY created_at DESC, id
@@ -79,14 +80,15 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
 
             await connection.ExecuteAsync(new CommandDefinition(
                 """
-                INSERT INTO member_invitations (id, agency_id, business_model, email, role, token_hash, invited_by, created_at, expires_at)
-                VALUES (@Id, @AgencyId, @businessModel, @Email, @role, @TokenHash, @InvitedBy, @CreatedAt, @ExpiresAt)
+                INSERT INTO member_invitations (id, agency_id, business_model, full_name, email, role, token_hash, invited_by, created_at, expires_at)
+                VALUES (@Id, @AgencyId, @businessModel, @FullName, @Email, @role, @TokenHash, @InvitedBy, @CreatedAt, @ExpiresAt)
                 """,
                 new
                 {
                     invitation.Id,
                     invitation.AgencyId,
                     businessModel = invitation.BusinessModel.ToDb(),
+                    invitation.FullName,
                     invitation.Email,
                     role = invitation.Role.ToDb(),
                     invitation.TokenHash,
@@ -127,7 +129,7 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                "SELECT team_change_role(@memberUserId, @role)",
+                "SELECT team_change_role_v2(@memberUserId, @role)",
                 new { memberUserId, role = role.ToDb() },
                 cancellationToken: cancellationToken));
         }
@@ -137,13 +139,53 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
         }
     }
 
+    public async Task SetMemberActiveAsync(
+        Guid agencyId, Guid userId, Guid memberUserId, bool isActive, CancellationToken cancellationToken)
+    {
+        await using var connection = await connections.OpenAsync(agencyId, userId, cancellationToken);
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "SELECT team_set_member_active(@memberUserId, @isActive)",
+                new { memberUserId, isActive },
+                cancellationToken: cancellationToken));
+        }
+        catch (PostgresException exception) when (Translate(exception) is { } translated)
+        {
+            throw translated;
+        }
+    }
+
+    public async Task ActivateInvitationAsync(
+        Guid agencyId, Guid userId, Guid invitationId, Guid newUserId, string passwordHash, CancellationToken cancellationToken)
+    {
+        await using var connection = await connections.OpenAsync(agencyId, userId, cancellationToken);
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                "SELECT team_activate_invitation(@invitationId, @newUserId, @passwordHash)",
+                new { invitationId, newUserId, passwordHash },
+                cancellationToken: cancellationToken));
+        }
+        catch (PostgresException exception) when (Translate(exception) is { } translated)
+        {
+            throw translated;
+        }
+        catch (PostgresException exception)
+            when (exception.SqlState == PostgresErrorCodes.UniqueViolation && exception.ConstraintName == UniqueEmailIndex)
+        {
+            // Two people were activated for the same address at the same moment.
+            throw new ConflictException("This email already has an account.", "email_taken");
+        }
+    }
+
     public async Task RemoveMemberAsync(Guid agencyId, Guid userId, Guid memberUserId, CancellationToken cancellationToken)
     {
         await using var connection = await connections.OpenAsync(agencyId, userId, cancellationToken);
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                "SELECT team_remove_member(@memberUserId)", new { memberUserId }, cancellationToken: cancellationToken));
+                "SELECT team_remove_member_v2(@memberUserId)", new { memberUserId }, cancellationToken: cancellationToken));
         }
         catch (PostgresException exception) when (Translate(exception) is { } translated)
         {
@@ -180,7 +222,9 @@ public sealed class TeamRepository(IDbConnectionFactory connections) : ITeamRepo
             "member_not_found" => new NotFoundException("That person is not a member of this organization.", "member_not_found"),
             "cannot_change_self" => new ConflictException("You cannot change or remove yourself.", "cannot_change_self"),
             "last_organization_admin" => new ConflictException(
-                "An organization needs at least one organization admin.", "last_organization_admin"),
+                "An organization needs at least one active organization admin.", "last_organization_admin"),
+            "invitation_not_found" => new NotFoundException("That invitation is not waiting any more.", "invitation_not_found"),
+            "email_taken" => new ConflictException("This email already has an account.", "email_taken"),
             _ => null
         };
     }

@@ -56,7 +56,8 @@ public sealed class InvitationAcceptanceTests
         BusinessModel = BusinessModel.Company,
         Email = "new@example.com",
         Role = role,
-        ExpiresAt = _time.Now.AddDays(5)
+        ExpiresAt = _time.Now.AddDays(5),
+        FullName = "Dev Kumar"
     };
 
     private void GivenPending(InvitationPreviewRecord? invitation) =>
@@ -65,14 +66,16 @@ public sealed class InvitationAcceptanceTests
     // --- Preview -----------------------------------------------------------------------------
 
     [Fact]
-    public async Task Preview_ShowsWhereTheLinkLeadsAndForWhichAddress()
+    public async Task Preview_ShowsWhereTheLinkLeadsAndForWhichAddress_AndTheNameTheAdminTyped()
     {
         var pending = Pending(OrganizationRole.ContentWriter);
         GivenPending(pending);
 
         var preview = await _service.PreviewInvitationAsync(new InvitationTokenRequest(Token), CancellationToken.None);
 
-        Assert.Equal(new InvitationPreviewResponse("Acme", BusinessModel.Company, OrganizationRole.ContentWriter, "new@example.com", pending.ExpiresAt), preview);
+        Assert.Equal(
+            new InvitationPreviewResponse("Acme", BusinessModel.Company, OrganizationRole.ContentWriter, "new@example.com", pending.ExpiresAt, "Dev Kumar"),
+            preview);
     }
 
     [Fact]

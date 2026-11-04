@@ -9,4 +9,7 @@ public sealed class MembershipRecord
     public string AgencyName { get; set; } = string.Empty;
     public BusinessModel BusinessModel { get; set; }
     public OrganizationRole Role { get; set; }
+
+    /// <summary>False when an admin has deactivated this person: they cannot sign in to this organization.</summary>
+    public bool IsActive { get; set; } = true;
 }

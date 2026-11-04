@@ -6,8 +6,10 @@ import {
   messageForInvitationPreviewError,
   messageForInviteError,
   messageForTeamActionError,
+  messageForSignInError,
   messageForTeamLoadError,
   validateAcceptance,
+  validateDefaultPassword,
   validateInvite,
 } from './messages';
 import { hasTeam, rolesFor, upcomingAreas } from './roles';
@@ -58,12 +60,35 @@ describe('the dashboard', () => {
 });
 
 describe('validateInvite', () => {
-  it('asks for an address, a valid one, and a role, in that order', () => {
-    expect(validateInvite('', 'contentwriter')).toEqual({ field: 'email', message: 'Enter your email address.' });
-    expect(validateInvite('nobody', 'contentwriter')).toEqual({ field: 'email', message: 'Enter a valid email address.' });
-    expect(validateInvite('a@b.co', '')).toEqual({ field: 'role', message: 'Choose a role for the new employee.' });
-    expect(validateInvite(`${'a'.repeat(250)}@b.co`, 'contentwriter')?.field).toBe('email');
-    expect(validateInvite('a@b.co', 'contentwriter')).toBeNull();
+  it('asks for a name, an address, a valid one, and a role, in that order', () => {
+    expect(validateInvite('', 'a@b.co', 'contentwriter')).toEqual({ field: 'fullName', message: "Enter the new employee's name." });
+    expect(validateInvite('   ', 'a@b.co', 'contentwriter')?.field).toBe('fullName');
+    expect(validateInvite('x'.repeat(201), 'a@b.co', 'contentwriter')?.field).toBe('fullName');
+    expect(validateInvite('Ana', '', 'contentwriter')).toEqual({ field: 'email', message: 'Enter your email address.' });
+    expect(validateInvite('Ana', 'nobody', 'contentwriter')).toEqual({ field: 'email', message: 'Enter a valid email address.' });
+    expect(validateInvite('Ana', 'a@b.co', '')).toEqual({ field: 'role', message: 'Choose a role for the new employee.' });
+    expect(validateInvite('Ana', `${'a'.repeat(250)}@b.co`, 'contentwriter')?.field).toBe('email');
+    expect(validateInvite('x'.repeat(200), 'a@b.co', 'contentwriter')).toBeNull();
+    expect(validateInvite('Ana', 'a@b.co', 'contentwriter')).toBeNull();
+  });
+});
+
+describe('validateDefaultPassword', () => {
+  it('asks for 10 to 128 characters', () => {
+    expect(validateDefaultPassword('short')).toEqual({ field: 'password', message: 'Choose a password of at least 10 characters.' });
+    expect(validateDefaultPassword('')?.field).toBe('password');
+    expect(validateDefaultPassword('p'.repeat(129))).toEqual({ field: 'password', message: 'The password must be at most 128 characters.' });
+    expect(validateDefaultPassword('ten chars!!')).toBeNull();
+    expect(validateDefaultPassword('p'.repeat(128))).toBeNull();
+  });
+});
+
+describe('a deactivated account at sign-in', () => {
+  it('is told why, and a wrong password is still just a wrong password', () => {
+    const deactivated = new ApiError(403, 'x', { code: 'account_deactivated' });
+
+    expect(messageForSignInError(deactivated)).toBe('Your account has been deactivated. Ask your organization admin to activate it.');
+    expect(messageForSignInError(new ApiError(401, 'x', { code: 'invalid_credentials' }))).toBe('Email or password is incorrect.');
   });
 });
 
@@ -92,7 +117,9 @@ describe('the team wording', () => {
   });
 
   it('explains why a role change, a removal or a cancellation did not go through', () => {
-    expect(messageForTeamActionError(failure(409, 'last_organization_admin'))).toMatch(/at least one organization admin/);
+    expect(messageForTeamActionError(failure(409, 'last_organization_admin'))).toMatch(/at least one active organization admin/);
+    expect(messageForTeamActionError(failure(409, 'email_taken'))).toMatch(/now has an account.*Delete the invitation/);
+    expect(messageForTeamActionError(failure(400, null, { password: ['Password must be at least 10 characters.'] }))).toBe('Password must be at least 10 characters.');
     expect(messageForTeamActionError(failure(409, 'cannot_change_self'))).toMatch(/cannot change or remove yourself/);
     expect(messageForTeamActionError(failure(404, 'member_not_found'))).toMatch(/no longer in the organization/);
     expect(messageForTeamActionError(failure(404, 'invitation_not_found'))).toMatch(/not waiting any more/);

@@ -18,12 +18,13 @@ describe('the team page: the table', () => {
     expect(person.getByText('ben@example.com')).toBeTruthy();
     expect((person.getByLabelText('Role of Ben Jones') as HTMLSelectElement).value).toBe('marketingmanager');
     expect(person.getByText('Active')).toBeTruthy();
-    expect(person.getByText('Joined Mar 5, 2026')).toBeTruthy();
+    expect(person.getByText('Mar 5, 2026')).toBeTruthy(); // the date the person was created
 
     const waiting = within(rowOf('dev@example.com'));
     expect(waiting.getByText('Content Writer')).toBeTruthy();
     expect(waiting.getByText('Invited')).toBeTruthy();
     expect(waiting.getByText('Expires Jan 15, 2030')).toBeTruthy();
+    expect(waiting.getByText('Nov 1, 2026')).toBeTruthy(); // the date the invitation was made
 
     const expired = within(rowOf('old@example.com'));
     expect(expired.getByText('Expired')).toBeTruthy();

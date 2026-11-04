@@ -12,12 +12,21 @@ public interface ITeamService
     Task<TeamResponse> GetTeamAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Invites an address with a role and returns the secret for the link, once. Refuses an address that already has an
-    /// account (email_taken), a role the organization's model does not have, and a creator's organization.
+    /// Invites a person (name, address, role) and returns the secret for the link, once. Refuses an address that
+    /// already has an account (email_taken), a role the organization's model does not have, and a creator's organization.
     /// </summary>
     Task<CreatedInvitationResponse> InviteAsync(InviteMemberRequest request, CancellationToken cancellationToken);
 
     Task RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Activates a waiting invitation by hand with the default password the admin chose: the person becomes an active
+    /// member at once and the invitation's link stops working. They sign in with their address and that password.
+    /// </summary>
+    Task ActivateInvitationAsync(Guid invitationId, ActivateInvitationRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Deactivates or activates a member. Deactivating ends their sessions at once and refuses their sign-in.</summary>
+    Task SetMemberActiveAsync(Guid memberUserId, SetMemberActiveRequest request, CancellationToken cancellationToken);
 
     /// <summary>The person signs in again to get the permissions of the new role.</summary>
     Task ChangeRoleAsync(Guid memberUserId, ChangeMemberRoleRequest request, CancellationToken cancellationToken);

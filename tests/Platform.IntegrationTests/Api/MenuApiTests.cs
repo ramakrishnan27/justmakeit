@@ -69,7 +69,7 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
 
     private async Task<(string Token, Guid InvitationId)> InviteAsync(Session admin, string email, string role)
     {
-        var response = await Host.PostAsync("/v1/members/invitations", new { email, role }, admin.AccessToken);
+        var response = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email, role }, admin.AccessToken);
         AssertStatus(HttpStatusCode.Created, response);
         var body = await ApiTestHost.ReadJsonAsync(response);
         return (body.GetProperty("token").GetString()!, body.GetProperty("invitation").GetProperty("id").GetGuid());

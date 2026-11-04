@@ -109,14 +109,19 @@ export interface TeamMember {
   email: string;
   fullName: string;
   role: OrganizationRole;
+  /** When the person was added to the organization (the date shown as "created"). */
   joinedAt: string;
   /** True for the person looking at the page: nobody can change or remove themselves. */
   isYou: boolean;
+  /** False when an admin has deactivated the person: they keep their place but cannot sign in. */
+  isActive: boolean;
 }
 
 /** An invitation nobody has accepted yet. The secret of its link is not here: the server keeps only a hash of it. */
 export interface Invitation {
   id: string;
+  /** The name the admin typed. Empty for an invitation made before names were asked for. */
+  fullName: string;
   email: string;
   role: OrganizationRole;
   createdAt: string;
@@ -142,6 +147,8 @@ export interface InvitationPreview {
   role: OrganizationRole;
   email: string;
   expiresAt: string;
+  /** The name the admin typed, offered on the form. Empty for an older invitation. */
+  fullName: string;
 }
 
 export interface AcceptInvitationDetails {

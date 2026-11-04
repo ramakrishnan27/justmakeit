@@ -11,6 +11,7 @@ const preview: InvitationPreview = {
   role: 'marketingmanager',
   email: 'dev@example.com',
   expiresAt: '2030-01-15T12:00:00Z',
+  fullName: 'Dev Kumar',
 };
 
 const bodyOf = (call: RecordedCall) => JSON.parse(call.init.body as string);
@@ -51,6 +52,27 @@ describe('the accept-invitation page', () => {
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/accept-invite'));
   });
 
+  it('offers the name the admin typed, which the person may change', async () => {
+    const { fetchFn } = await open();
+    await screen.findByRole('heading', { name: 'Join Northwind Foods' });
+
+    expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Dev Kumar');
+
+    fill('Devi K. Kumar', 'a long enough password');
+    fireEvent.click(screen.getByRole('button', { name: 'Create my account' }));
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/dashboard'));
+    const accept = fetchFn.calls.find((candidate) => requestLine(candidate) === 'POST /v1/auth/invitations/accept')!;
+    expect(bodyOf(accept).fullName).toBe('Devi K. Kumar');
+  });
+
+  it('leaves the name empty for an older invitation that has none', async () => {
+    await open(`#${secret}`, { 'POST /v1/auth/invitations/preview': () => jsonResponse(200, { ...preview, fullName: '' }) });
+    await screen.findByRole('heading', { name: 'Join Northwind Foods' });
+
+    expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('');
+  });
+
   it('is open to a signed-in person too, and tells them that accepting replaces their sign-in', async () => {
     await renderApp(`/accept-invite#${secret}`, memberServer({}, { 'POST /v1/auth/invitations/preview': () => jsonResponse(200, preview) }));
 
@@ -62,6 +84,8 @@ describe('the accept-invitation page', () => {
     const { fetchFn } = await open();
     await screen.findByRole('heading', { name: 'Join Northwind Foods' });
 
+    // The name the admin typed is offered; a person who clears it is asked for one.
+    fireEvent.change(screen.getByLabelText('Your name'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create my account' }));
     expect(screen.getByRole('alert').textContent).toBe('Enter your name.');
     expect(document.activeElement).toBe(screen.getByLabelText('Your name'));

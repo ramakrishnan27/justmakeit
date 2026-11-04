@@ -5,23 +5,23 @@ import type { Feedback } from './feedback';
 import { displayName, type TeamRow } from './teamRows';
 import type { TeamActions } from './useTeam';
 
-/** "remove 2 people and cancel 1 invitation": what removing these rows does, in the words of each kind of row. */
-function describe(rows: readonly TeamRow[], verbs: { member: string; invitation: string }): string {
+/** "delete 2 people and 1 invitation": what deleting these rows does, in the words of each kind of row. */
+function describe(rows: readonly TeamRow[], verb: string): string {
   const people = rows.filter((row) => row.kind === 'member').length;
   const invitations = rows.length - people;
   return [
-    people > 0 ? `${verbs.member} ${countLabel(people, 'person', 'people')}` : null,
-    invitations > 0 ? `${verbs.invitation} ${countLabel(invitations, 'invitation')}` : null,
+    people > 0 ? countLabel(people, 'person', 'people') : null,
+    invitations > 0 ? countLabel(invitations, 'invitation') : null,
   ]
     .filter((part) => part !== null)
-    .join(' and ');
+    .reduce((text, part, index) => (index === 0 ? `${verb} ${part}` : `${text} and ${part}`), '');
 }
 
 const capitalise = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
- * What can be done to the rows that are ticked: take them out of the organization (a person loses access at once; an
- * invitation stops working). It asks once, in the bar itself, and then goes through the rows one after the other.
+ * What can be done to the rows that are ticked: delete them (a person loses access and their account goes; an invitation
+ * stops working). It asks once, in the bar itself, and then goes through the rows one after the other.
  */
 export function SelectionBar({
   chosen,
@@ -47,7 +47,7 @@ export function SelectionBar({
     setConfirming(false);
 
     if (failures.length === 0) {
-      onFeedback({ tone: 'success', text: `${capitalise(describe(chosen, { member: 'removed', invitation: 'cancelled' }))}.` });
+      onFeedback({ tone: 'success', text: `${capitalise(describe(chosen, 'deleted'))}.` });
     } else {
       const [first] = failures;
       const more = failures.length > 1 ? ` ${countLabel(failures.length - 1, 'more row')} could not be changed either.` : '';
@@ -65,7 +65,7 @@ export function SelectionBar({
       <span className="selection-count">{`${chosen.length} selected`}</span>
       {confirming ? (
         <span className="selection-actions" role="group" aria-label="Confirm">
-          <span>{`${capitalise(describe(chosen, { member: 'remove', invitation: 'cancel' }))}?`}</span>
+          <span>{`${capitalise(describe(chosen, 'delete'))}?`}</span>
           <button className="row-action row-action-danger" type="button" disabled={busy} onClick={() => void removeAll()}>
             Yes, continue
           </button>
@@ -76,7 +76,7 @@ export function SelectionBar({
       ) : (
         <span className="selection-actions">
           <button className="row-action row-action-danger" type="button" onClick={() => setConfirming(true)}>
-            Remove selected
+            Delete selected
           </button>
           <button className="row-action" type="button" onClick={onClear}>
             Clear selection

@@ -16,7 +16,7 @@ public sealed class TeamRequestsTests
     [InlineData("marketingmanager")]
     [InlineData("contentwriter")]
     public void Invite_WithEachRoleName_IsValid(string role) =>
-        Assert.False(new InviteMemberRequest("new@example.com", role).Validate().Any);
+        Assert.False(new InviteMemberRequest("Test Person", "new@example.com", role).Validate().Any);
 
     [Theory]
     [InlineData(null)]
@@ -26,7 +26,7 @@ public sealed class TeamRequestsTests
     [InlineData("OrganizationAdmin")]
     [InlineData("1")]
     public void Invite_WithAMissingOrUnknownRole_ReportsTheRoleField(string? role) =>
-        Assert.Equal(["role"], Fields(new InviteMemberRequest("new@example.com", role).Validate()));
+        Assert.Equal(["role"], Fields(new InviteMemberRequest("Test Person", "new@example.com", role).Validate()));
 
     [Theory]
     [InlineData(null)]
@@ -34,11 +34,54 @@ public sealed class TeamRequestsTests
     [InlineData("no-at-sign")]
     [InlineData("Display Name <ana@example.com>")]
     public void Invite_WithABadEmail_ReportsTheEmailField(string? email) =>
-        Assert.Equal(["email"], Fields(new InviteMemberRequest(email, "contentwriter").Validate()));
+        Assert.Equal(["email"], Fields(new InviteMemberRequest("Test Person", email, "contentwriter").Validate()));
 
     [Fact]
-    public void Invite_WithNothing_ReportsBothFields() =>
-        Assert.Equal(["email", "role"], Fields(new InviteMemberRequest(null, null).Validate()));
+    public void Invite_WithNothing_ReportsEveryField() =>
+        Assert.Equal(["email", "fullName", "role"], Fields(new InviteMemberRequest(null, null, null).Validate()));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Invite_WithoutAName_ReportsTheNameField(string? name) =>
+        Assert.Equal(["fullName"], Fields(new InviteMemberRequest(name, "new@example.com", "contentwriter").Validate()));
+
+    [Fact]
+    public void Invite_WithANameOfAtMost200Characters_IsValid_AndOneLongerIsNot()
+    {
+        Assert.False(new InviteMemberRequest(new string('a', 200), "new@example.com", "contentwriter").Validate().Any);
+        Assert.Equal(["fullName"], Fields(new InviteMemberRequest(new string('a', 201), "new@example.com", "contentwriter").Validate()));
+    }
+
+    // --- Activate an invitation by hand ------------------------------------------------------
+
+    [Theory]
+    [InlineData("0123456789")]
+    [InlineData("a default password")]
+    public void ActivateInvitation_WithAPasswordOf10To128Characters_IsValid(string password) =>
+        Assert.False(new ActivateInvitationRequest(password).Validate().Any);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("123456789")]
+    public void ActivateInvitation_WithAMissingOrShortPassword_ReportsThePasswordField(string? password) =>
+        Assert.Equal(["password"], Fields(new ActivateInvitationRequest(password).Validate()));
+
+    [Fact]
+    public void ActivateInvitation_WithAPasswordOver128Characters_ReportsThePasswordField() =>
+        Assert.Equal(["password"], Fields(new ActivateInvitationRequest(new string('a', 129)).Validate()));
+
+    // --- Deactivate and activate a member ----------------------------------------------------
+
+    [Fact]
+    public void SetMemberActive_NeedsAYesOrANo()
+    {
+        Assert.False(new SetMemberActiveRequest(true).Validate().Any);
+        Assert.False(new SetMemberActiveRequest(false).Validate().Any);
+        Assert.Equal(["isActive"], Fields(new SetMemberActiveRequest(null).Validate()));
+    }
 
     // --- Change a role -----------------------------------------------------------------------
 

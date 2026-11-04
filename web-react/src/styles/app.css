@@ -828,7 +828,7 @@ label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; f
 .team input[type="checkbox"]:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* The table. Narrow screens (the default) show each row as a small card, so a role and a button never wait behind
-   sideways scrolling; from 1024 px, where the sidebar leaves room for it, it is the table of the design. */
+   sideways scrolling; from 76rem (1216 px), where the sidebar leaves room for its six columns, it is the table of the design. */
 .table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--team-line); border-radius: var(--radius); }
 .table-scroll:focus { outline: none; }
 .team-table { display: block; width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
@@ -842,7 +842,7 @@ label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; f
 .team-table tbody tr {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) auto;
-  grid-template-areas: "check name name" "check role role" "check status status" "check actions actions";
+  grid-template-areas: "check name name" "check role role" "check status status" "check created created" "check actions actions";
   align-items: center;
   gap: 6px 8px;
   padding: 8px 12px 8px 0;
@@ -858,16 +858,18 @@ label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; f
 .team-table tbody .cell-name { grid-area: name; }
 .team-table tbody .cell-role { grid-area: role; }
 .team-table tbody .cell-status { grid-area: status; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.team-table tbody .cell-created { grid-area: created; color: var(--muted); font-size: 0.8125rem; }
 .team-table tbody .cell-actions { grid-area: actions; }
 
 .employee-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 600; overflow-wrap: anywhere; }
 .employee-email { display: block; color: var(--muted); font-size: 0.8125rem; font-weight: 400; overflow-wrap: anywhere; }
-.status-date { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
+.status-date { color: var(--muted); font-size: 0.8125rem; }
+.row-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .role-text { font-weight: 600; }
 
 .cell-role select { width: 100%; border: 1.5px solid var(--team-line); border-radius: 999px; }
 
-@media (min-width: 64rem) {
+@media (min-width: 76rem) {
   .team-table { display: table; }
   .team-table thead { display: table-header-group; }
   .team-table tbody { display: table-row-group; }
@@ -888,6 +890,8 @@ label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; f
   .team-table thead th.cell-check, .team-table tbody td.cell-check { padding: 0 4px; }
   .team-table tbody td.cell-status { display: table-cell; }
   .status-date { display: block; margin-top: 2px; }
+  .created-label { display: none; }
+  .team-table tbody td.cell-created { color: inherit; font-size: inherit; white-space: nowrap; }
   .team-table .cell-actions { text-align: right; }
-  .cell-role select { min-width: 12rem; }
+  .cell-role select { min-width: 11rem; }
 }

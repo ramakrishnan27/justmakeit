@@ -11,11 +11,14 @@ export const member = (userId: string, fullName: string, role: TeamMember['role'
   role,
   joinedAt: '2026-03-05T10:30:00Z',
   isYou: false,
+  isActive: true,
   ...overrides,
 });
 
 export const invitation = (id: string, email: string, role: Invitation['role'], overrides: Partial<Invitation> = {}): Invitation => ({
   id,
+  // An invitation made before names were asked for has none; a test that wants one passes it.
+  fullName: '',
   email,
   role,
   createdAt: '2026-11-01T10:00:00Z',

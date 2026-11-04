@@ -13,11 +13,15 @@ export interface RowFailure {
 
 /** What the page can do to the team. Each one reads the team again when it is done, so the list shows what the server holds. */
 export interface TeamActions {
-  /** Makes an invitation. The answer carries the secret of its link, and nothing else ever does. */
-  invite(email: string, role: OrganizationRole): Promise<CreatedInvitation>;
+  /** Makes an invitation for a named person. The answer carries the secret of its link, and nothing else ever does. */
+  invite(fullName: string, email: string, role: OrganizationRole): Promise<CreatedInvitation>;
+  /** Turns a waiting invitation into an active person with the default password the admin typed. The link stops working. */
+  activate(invitationId: string, password: string): Promise<void>;
+  /** Deactivates (they are signed out at once and cannot sign in) or activates a person. */
+  setActive(userId: string, isActive: boolean): Promise<void>;
   /** Gives a person another role. It ends their current sign-in: they sign in again with the new one. */
   changeRole(userId: string, role: OrganizationRole): Promise<void>;
-  /** Removes people and cancels invitations, one after the other. Resolves with the ones the server refused. */
+  /** Deletes people and invitations, one after the other. Resolves with the ones the server refused. */
   removeRows(rows: readonly TeamRow[]): Promise<RowFailure[]>;
 }
 
@@ -76,9 +80,25 @@ export function useTeam() {
 
   const actions = useMemo<TeamActions>(
     () => ({
-      async invite(email, role) {
+      async invite(fullName, email, role) {
         try {
-          return await api.request<CreatedInvitation>('/v1/members/invitations', { method: 'POST', body: { email, role } });
+          return await api.request<CreatedInvitation>('/v1/members/invitations', { method: 'POST', body: { fullName, email, role } });
+        } finally {
+          await refresh();
+        }
+      },
+
+      async activate(invitationId, password) {
+        try {
+          await api.request(`/v1/members/invitations/${encodeURIComponent(invitationId)}/activate`, { method: 'POST', body: { password } });
+        } finally {
+          await refresh();
+        }
+      },
+
+      async setActive(userId, isActive) {
+        try {
+          await api.request(`/v1/members/${encodeURIComponent(userId)}/status`, { method: 'PUT', body: { isActive } });
         } finally {
           await refresh();
         }

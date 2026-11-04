@@ -39,6 +39,9 @@ export function validateSignIn(email: string, password: string): FieldProblem | 
 /** What to tell the user when signing in failed. */
 export function messageForSignInError(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.code === 'account_deactivated') {
+      return 'Your account has been deactivated. Ask your organization admin to activate it.';
+    }
     if (error.status === 401) {
       return 'Email or password is incorrect.';
     }
@@ -184,7 +187,13 @@ export function messageForTeamLoadError(error: unknown): string {
 }
 
 /** Checks the invite form before anything is sent. @returns The first problem found, or null. */
-export function validateInvite(email: string, role: string): FieldProblem | null {
+export function validateInvite(fullName: string, email: string, role: string): FieldProblem | null {
+  if (fullName.trim().length === 0) {
+    return { field: 'fullName', message: "Enter the new employee's name." };
+  }
+  if (fullName.trim().length > 200) {
+    return { field: 'fullName', message: 'The name must be at most 200 characters.' };
+  }
   const problem = validateSignIn(email, 'x');
   if (problem) {
     return problem;
@@ -230,7 +239,9 @@ export function messageForTeamActionError(error: unknown): string {
   if (error instanceof ApiError) {
     switch (error.code) {
       case 'last_organization_admin':
-        return 'An organization needs at least one organization admin.';
+        return 'An organization needs at least one active organization admin.';
+      case 'email_taken':
+        return 'That email address now has an account, so this invitation cannot be activated. Delete the invitation.';
       case 'cannot_change_self':
         return 'You cannot change or remove yourself.';
       case 'member_not_found':
@@ -254,6 +265,17 @@ export function messageForTeamActionError(error: unknown): string {
     }
   }
   return error instanceof ApiError ? 'That did not work. Try again in a moment.' : offline;
+}
+
+/** Checks the default password an admin types to activate an invited person. @returns The first problem found, or null. */
+export function validateDefaultPassword(password: string): FieldProblem | null {
+  if (password.length < minPasswordLength) {
+    return { field: 'password', message: `Choose a password of at least ${minPasswordLength} characters.` };
+  }
+  if (password.length > 128) {
+    return { field: 'password', message: 'The password must be at most 128 characters.' };
+  }
+  return null;
 }
 
 /** What to show on the invitation page when the link could not be read. */

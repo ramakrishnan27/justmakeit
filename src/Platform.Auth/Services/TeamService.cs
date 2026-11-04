@@ -16,6 +16,7 @@ public sealed class TeamService(
     ITeamRepository team,
     IAgencyRepository agencies,
     ISessionRevocationService revocations,
+    IPasswordHasher passwordHasher,
     ITenantContext tenant,
     IOptions<InvitationSettings> options,
     TimeProvider time,
@@ -30,7 +31,7 @@ public sealed class TeamService(
 
         var now = time.GetUtcNow();
         return new TeamResponse(
-            members.Select(m => new TeamMemberResponse(m.UserId, m.Email, m.FullName, m.Role, m.JoinedAt, m.UserId == userId)).ToList(),
+            members.Select(m => new TeamMemberResponse(m.UserId, m.Email, m.FullName, m.Role, m.JoinedAt, m.UserId == userId, m.IsActive)).ToList(),
             invitations.Select(i => ToResponse(i, now)).ToList());
     }
 
@@ -71,6 +72,7 @@ public sealed class TeamService(
             Guid.NewGuid(),
             agencyId,
             agency.BusinessModel,
+            request.FullName!.Trim(),
             email,
             role,
             HashHelper.Sha256Hex(token),
@@ -83,7 +85,7 @@ public sealed class TeamService(
         // Ids only: neither the token nor the address is logged.
         logger.LogInformation("User {UserId} invited a {Role} to organization {AgencyId} (invitation {InvitationId})", userId, role, agencyId, invitation.Id);
         return new CreatedInvitationResponse(
-            new InvitationResponse(invitation.Id, email, role, invitation.CreatedAt, invitation.ExpiresAt, IsExpired: false),
+            new InvitationResponse(invitation.Id, invitation.FullName, email, role, invitation.CreatedAt, invitation.ExpiresAt, IsExpired: false),
             token);
     }
 
@@ -97,6 +99,49 @@ public sealed class TeamService(
         }
 
         logger.LogInformation("User {UserId} revoked invitation {InvitationId} of organization {AgencyId}", userId, invitationId, agencyId);
+    }
+
+    public async Task ActivateInvitationAsync(Guid invitationId, ActivateInvitationRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        var (agencyId, userId) = RequireManager();
+
+        var newUserId = Guid.NewGuid();
+        try
+        {
+            await team.ActivateInvitationAsync(
+                agencyId, userId, invitationId, newUserId, passwordHasher.Hash(request.Password!), cancellationToken);
+        }
+        finally
+        {
+            // The list of ended sessions does not change here, but a new member exists: keep the rule the same for every team change.
+            revocations.Invalidate();
+        }
+
+        // Ids only: neither the password nor the address is logged.
+        logger.LogInformation(
+            "User {UserId} activated invitation {InvitationId} of organization {AgencyId} by hand as {NewUserId}", userId, invitationId, agencyId, newUserId);
+    }
+
+    public async Task SetMemberActiveAsync(Guid memberUserId, SetMemberActiveRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        var (agencyId, userId) = RequireManager();
+        RequireOtherPerson(memberUserId, userId);
+
+        try
+        {
+            await team.SetMemberActiveAsync(agencyId, userId, memberUserId, request.IsActive!.Value, cancellationToken);
+        }
+        finally
+        {
+            // Deactivating ends the person's sessions in the database; the in-memory list must learn of it at once.
+            revocations.Invalidate();
+        }
+
+        logger.LogInformation(
+            "User {UserId} {Change} {MemberUserId} in organization {AgencyId}",
+            userId, request.IsActive!.Value ? "activated" : "deactivated", memberUserId, agencyId);
     }
 
     public async Task ChangeRoleAsync(Guid memberUserId, ChangeMemberRoleRequest request, CancellationToken cancellationToken)
@@ -177,5 +222,5 @@ public sealed class TeamService(
     }
 
     private static InvitationResponse ToResponse(InvitationRecord invitation, DateTimeOffset now) =>
-        new(invitation.Id, invitation.Email, invitation.Role, invitation.CreatedAt, invitation.ExpiresAt, invitation.ExpiresAt <= now);
+        new(invitation.Id, invitation.FullName, invitation.Email, invitation.Role, invitation.CreatedAt, invitation.ExpiresAt, invitation.ExpiresAt <= now);
 }

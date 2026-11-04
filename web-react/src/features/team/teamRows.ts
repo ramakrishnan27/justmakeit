@@ -5,7 +5,8 @@ import type { BusinessModel, OrganizationRole, Team } from '@/api/types';
 import { formatDate } from '@/lib/format';
 import { rolesFor, roleTitle } from '@/lib/roles';
 
-export type RowStatus = 'active' | 'invited' | 'expired';
+/** A person is active or deactivated; an invitation is waiting or its link has expired. */
+export type RowStatus = 'active' | 'inactive' | 'invited' | 'expired';
 
 export interface TeamRow {
   /** Unique across both kinds (a person and an invitation could share an id by accident, never a key). */
@@ -13,20 +14,22 @@ export interface TeamRow {
   kind: 'member' | 'invitation';
   /** The user id of a member, the id of an invitation. */
   id: string;
-  /** Empty for an invitation: nobody has told us their name yet. */
+  /** What the admin typed for an invitation, or the person's own name. Empty when nobody gave one. */
   name: string;
   email: string;
   role: OrganizationRole;
   status: RowStatus;
-  /** When the person joined, or when the invitation ends (or ended). */
-  date: string;
-  /** The person looking at the page. Nobody can change or remove themselves. */
+  /** When the person was added to the organization, or the invitation was made. */
+  createdAt: string;
+  /** When the link of an invitation ends (or ended). Null for a person. */
+  expiresAt: string | null;
+  /** The person looking at the page. Nobody can change, deactivate or delete themselves. */
   isYou: boolean;
 }
 
-const statusTitles: Record<RowStatus, string> = { active: 'Active', invited: 'Invited', expired: 'Expired' };
+const statusTitles: Record<RowStatus, string> = { active: 'Active', inactive: 'Inactive', invited: 'Invited', expired: 'Expired' };
 
-export const statuses: readonly RowStatus[] = ['active', 'invited', 'expired'];
+export const statuses: readonly RowStatus[] = ['active', 'inactive', 'invited', 'expired'];
 
 export function statusTitle(status: RowStatus): string {
   return statusTitles[status];
@@ -37,7 +40,7 @@ export function displayName(row: Pick<TeamRow, 'name' | 'email'>): string {
   return row.name.trim().length > 0 ? row.name : row.email;
 }
 
-/** The table's rows: the people (by name, you included) and then the waiting invitations (by address). */
+/** The table's rows: the people (by name, you included) and then the waiting invitations (by name, then address). */
 export function buildRows(team: Team): TeamRow[] {
   const people: TeamRow[] = team.members.map((member) => ({
     key: `member:${member.userId}`,
@@ -46,31 +49,40 @@ export function buildRows(team: Team): TeamRow[] {
     name: member.fullName,
     email: member.email,
     role: member.role,
-    status: 'active',
-    date: member.joinedAt,
+    status: member.isActive ? 'active' : 'inactive',
+    createdAt: member.joinedAt,
+    expiresAt: null,
     isYou: member.isYou,
   }));
   const invited: TeamRow[] = team.invitations.map((invitation) => ({
     key: `invitation:${invitation.id}`,
     kind: 'invitation',
     id: invitation.id,
-    name: '',
+    name: invitation.fullName,
     email: invitation.email,
     role: invitation.role,
     status: invitation.isExpired ? 'expired' : 'invited',
-    date: invitation.expiresAt,
+    createdAt: invitation.createdAt,
+    expiresAt: invitation.expiresAt,
     isYou: false,
   }));
 
   const byName = (a: TeamRow, b: TeamRow) =>
     displayName(a).localeCompare(displayName(b), 'en', { sensitivity: 'base' }) || a.email.localeCompare(b.email);
-  return [...people.sort(byName), ...invited.sort((a, b) => a.email.localeCompare(b.email))];
+  return [...people.sort(byName), ...invited.sort(byName)];
 }
 
-/** "Joined Mar 5, 2026", "Expires Mar 12, 2026" or "Expired Mar 1, 2026". */
-export function dateText(row: Pick<TeamRow, 'status' | 'date'>): string {
-  const lead = row.status === 'active' ? 'Joined' : row.status === 'invited' ? 'Expires' : 'Expired';
-  return `${lead} ${formatDate(row.date)}`;
+/** "Mar 5, 2026": the date the person or the invitation was created. */
+export function createdText(row: Pick<TeamRow, 'createdAt'>): string {
+  return formatDate(row.createdAt);
+}
+
+/** "Expires Mar 12, 2026" or "Expired Mar 1, 2026" for an invitation; nothing for a person. */
+export function expiryText(row: Pick<TeamRow, 'status' | 'expiresAt'>): string | null {
+  if (row.expiresAt === null) {
+    return null;
+  }
+  return `${row.status === 'expired' ? 'Expired' : 'Expires'} ${formatDate(row.expiresAt)}`;
 }
 
 export type Filter = { kind: 'role'; value: OrganizationRole } | { kind: 'status'; value: RowStatus };

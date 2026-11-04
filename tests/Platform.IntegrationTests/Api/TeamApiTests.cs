@@ -15,7 +15,7 @@ namespace Platform.IntegrationTests.Api;
 /// </summary>
 [Collection(PostgresCollection.Name)]
 [Trait("Category", "Docker")]
-public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
+public sealed partial class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private const string EmployeePassword = "employee password 123";
 
@@ -32,7 +32,7 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
 
     private async Task<(string Token, Guid InvitationId)> InviteAsync(Session admin, string email, string role)
     {
-        var response = await Host.PostAsync("/v1/members/invitations", new { email, role }, tokenCookie: admin.AccessToken);
+        var response = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email, role }, tokenCookie: admin.AccessToken);
         AssertStatus(HttpStatusCode.Created, response);
         var body = await ApiTestHost.ReadJsonAsync(response);
         return (body.GetProperty("token").GetString()!, body.GetProperty("invitation").GetProperty("id").GetGuid());
@@ -168,7 +168,7 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
 
         foreach (var email in new[] { other.Email, other.Email.ToUpperInvariant(), admin.Email })
         {
-            var response = await Host.PostAsync("/v1/members/invitations", new { email, role = "contentwriter" }, tokenCookie: admin.AccessToken);
+            var response = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email, role = "contentwriter" }, tokenCookie: admin.AccessToken);
 
             AssertStatus(HttpStatusCode.Conflict, response);
             Assert.Equal("email_taken", await CodeOfAsync(response));
@@ -184,7 +184,7 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         var email = NewEmail();
         var (first, firstId) = await InviteAsync(admin, email, "contentwriter");
 
-        var second = await Host.PostAsync("/v1/members/invitations", new { email = email.ToUpperInvariant(), role = "marketingmanager" }, tokenCookie: admin.AccessToken);
+        var second = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email = email.ToUpperInvariant(), role = "marketingmanager" }, tokenCookie: admin.AccessToken);
         AssertStatus(HttpStatusCode.Conflict, second);
         Assert.Equal("invitation_exists", await CodeOfAsync(second));
 
@@ -208,7 +208,7 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         var company = await RegisterAsync("company");
         var agency = await RegisterAsync("agency");
 
-        var refused = await Host.PostAsync("/v1/members/invitations", new { email = NewEmail(), role = "clientmanager" }, tokenCookie: company.AccessToken);
+        var refused = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email = NewEmail(), role = "clientmanager" }, tokenCookie: company.AccessToken);
         AssertStatus(HttpStatusCode.BadRequest, refused);
         Assert.True((await ApiTestHost.ReadJsonAsync(refused)).GetProperty("errors").TryGetProperty("role", out _));
 
@@ -226,7 +226,7 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         // And if the Site admin ever granted it, the model still refuses.
         var granted = Host.Factory.CreateAccessToken(
             creator.UserId, creator.AgencyId, OrganizationRole.ContentWriter, [PermissionKeys.DashboardView, PermissionKeys.MembersManage]);
-        var response = await Host.PostAsync("/v1/members/invitations", new { email = NewEmail(), role = "contentwriter" }, tokenCookie: granted);
+        var response = await Host.PostAsync("/v1/members/invitations", new { fullName = "Test Person", email = NewEmail(), role = "contentwriter" }, tokenCookie: granted);
         AssertStatus(HttpStatusCode.Conflict, response);
         Assert.Equal("team_not_available", await CodeOfAsync(response));
     }
@@ -243,7 +243,10 @@ public sealed class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
 
         Assert.Equal(["organizationadmin"], RolesIn(team));
         var invitation = team.GetProperty("invitations")[0];
-        Assert.Equal(["createdAt", "email", "expiresAt", "id", "isExpired", "role"], invitation.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal(["createdAt", "email", "expiresAt", "fullName", "id", "isExpired", "role"], invitation.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal(
+            ["email", "fullName", "isActive", "isYou", "joinedAt", "role", "userId"],
+            team.GetProperty("members")[0].EnumerateObject().Select(p => p.Name).Order());
         var raw = team.GetRawText();
         Assert.DoesNotContain("b-employee@example.com", raw);
         Assert.DoesNotContain("hash", raw, StringComparison.OrdinalIgnoreCase);

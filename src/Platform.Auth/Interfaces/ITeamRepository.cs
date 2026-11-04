@@ -29,6 +29,19 @@ public interface ITeamRepository
     Task<bool> RevokeInvitationAsync(Guid agencyId, Guid userId, Guid invitationId, DateTimeOffset now, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Deactivates (false) or activates (true) a member. Deactivating ends their sessions. Throws member_not_found,
+    /// cannot_change_self or last_organization_admin (the last ACTIVE admin cannot be deactivated).
+    /// </summary>
+    Task SetMemberActiveAsync(Guid agencyId, Guid userId, Guid memberUserId, bool isActive, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Turns a waiting invitation into a member with the given password hash, as accepting it would, and marks the
+    /// invitation used. Throws invitation_not_found or email_taken.
+    /// </summary>
+    Task ActivateInvitationAsync(
+        Guid agencyId, Guid userId, Guid invitationId, Guid newUserId, string passwordHash, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Gives a member another role and ends that person's sessions. Throws member_not_found, cannot_change_self,
     /// last_organization_admin or a role the organization's model does not allow.
     /// </summary>

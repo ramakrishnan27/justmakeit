@@ -5,13 +5,14 @@ import { countLabel } from '@/lib/format';
 import { messageForTeamLoadError } from '@/lib/messages';
 import { hasTeam } from '@/lib/roles';
 import { useMember } from '@/session/SessionContext';
+import { ActivateDialog } from './ActivateDialog';
 import type { Feedback } from './feedback';
 import { FilterBar } from './FilterBar';
 import { InviteDialog } from './InviteDialog';
 import { SelectionBar } from './SelectionBar';
 import { TeamTable } from './TeamTable';
 import { TeamToolbar } from './TeamToolbar';
-import { buildRows, visibleRows, type Filter } from './teamRows';
+import { buildRows, displayName, visibleRows, type Filter, type TeamRow } from './teamRows';
 import { useTeam } from './useTeam';
 
 /**
@@ -30,18 +31,25 @@ export default function TeamPage() {
   const [filters, setFilters] = useState<Filter[]>([]);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [inviting, setInviting] = useState(false);
+  // The waiting invitation being activated by hand (the dialog that asks for a default password is open).
+  const [activating, setActivating] = useState<TeamRow | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const inviteButton = useRef<HTMLButtonElement>(null);
   const tableRegion = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => (state.status === 'ready' ? buildRows(state.team) : []), [state]);
   const shown = useMemo(() => visibleRows(rows, search, filters), [rows, search, filters]);
-  // Only what is on screen counts as chosen: a tick on a row the search has hidden must never be removed by accident.
+  // Only what is on screen counts as chosen: a tick on a row the search has hidden must never be deleted by accident.
   const chosen = shown.filter((row) => selected.has(row.key) && !row.isYou);
 
   // The dialog gives focus back to the New Employee button itself when it closes.
   function closeInvite() {
     setInviting(false);
+  }
+
+  function activated(row: TeamRow) {
+    setActivating(null);
+    setFeedback({ tone: 'success', text: `${displayName(row)} is active now. They can sign in as ${row.email} with the password you set.` });
   }
 
   function clearSearchAndFilters() {
@@ -66,6 +74,15 @@ export default function TeamPage() {
       />
 
       {canInvite && inviting ? <InviteDialog model={model} invite={actions.invite} onClose={closeInvite} returnFocus={inviteButton} /> : null}
+      {activating ? (
+        <ActivateDialog
+          row={activating}
+          activate={actions.activate}
+          onActivated={activated}
+          onClose={() => setActivating(null)}
+          returnFocus={tableRegion}
+        />
+      ) : null}
       {canInvite ? null : <p className="muted">An individual creator works alone, so there is nobody to invite.</p>}
 
       <div aria-live="polite">
@@ -122,6 +139,7 @@ export default function TeamPage() {
               onSelect={setSelected}
               actions={actions}
               onFeedback={setFeedback}
+              onActivate={setActivating}
               onRemoved={() => tableRegion.current?.focus()}
               region={tableRegion}
             />

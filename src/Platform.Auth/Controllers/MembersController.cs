@@ -50,6 +50,29 @@ public sealed class MembersController(ITeamService team) : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Activates a waiting invitation by hand: the admin gives the default password the person will sign in with. The
+    /// person becomes an active member at once and the invitation's link stops working.
+    /// </summary>
+    [HttpPost("invitations/{invitationId:guid}/activate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ActivateInvitation(Guid invitationId, ActivateInvitationRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        await team.ActivateInvitationAsync(invitationId, request, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>Deactivates or activates a member. A deactivated person's sessions end at once and they cannot sign in.</summary>
+    [HttpPut("{userId:guid}/status")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> SetStatus(Guid userId, SetMemberActiveRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        await team.SetMemberActiveAsync(userId, request, cancellationToken);
+        return NoContent();
+    }
+
     /// <summary>Gives a member another role. Their sessions end: they sign in again to get the new role's permissions.</summary>
     [HttpPut("{userId:guid}/role")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

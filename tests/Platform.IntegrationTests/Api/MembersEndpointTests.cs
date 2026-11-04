@@ -38,10 +38,12 @@ public sealed class MembersEndpointTests : IAsyncLifetime
     private static readonly (string Name, HttpMethod Method, string Path, object? Body)[] Endpoints =
     [
         ("list the team", HttpMethod.Get, "/v1/members", null),
-        ("invite", HttpMethod.Post, "/v1/members/invitations", new { email = "new@example.com", role = "contentwriter" }),
+        ("invite", HttpMethod.Post, "/v1/members/invitations", new { fullName = "Test Person", email = "new@example.com", role = "contentwriter" }),
         ("revoke an invitation", HttpMethod.Delete, $"/v1/members/invitations/{SomeInvitation}", null),
         ("change a role", HttpMethod.Put, $"/v1/members/{SomeMember}/role", new { role = "contentwriter" }),
-        ("remove a member", HttpMethod.Delete, $"/v1/members/{SomeMember}", null)
+        ("remove a member", HttpMethod.Delete, $"/v1/members/{SomeMember}", null),
+        ("deactivate a member", HttpMethod.Put, $"/v1/members/{SomeMember}/status", new { isActive = false }),
+        ("activate an invitation", HttpMethod.Post, $"/v1/members/invitations/{SomeInvitation}/activate", new { password = "a default password" })
     ];
 
     public static TheoryData<string> EndpointNames() => [.. Endpoints.Select(e => e.Name)];
@@ -174,6 +176,8 @@ public sealed class MembersEndpointTests : IAsyncLifetime
     [Theory]
     [InlineData("{}", "email")]
     [InlineData("""{"email":"new@example.com"}""", "role")]
+    [InlineData("""{"email":"new@example.com","role":"contentwriter"}""", "fullName")]
+    [InlineData("""{"fullName":"  ","email":"new@example.com","role":"contentwriter"}""", "fullName")]
     [InlineData("""{"email":"new@example.com","role":"boss"}""", "role")]
     [InlineData("""{"email":"nope","role":"contentwriter"}""", "email")]
     public async Task AnInviteWithABadBody_Is400WithTheField_AndTheServiceIsNotCalled(string json, string field)
@@ -198,9 +202,57 @@ public sealed class MembersEndpointTests : IAsyncLifetime
     }
 
     [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"isActive":null}""")]
+    [InlineData("""{"isActive":"yes"}""")]
+    public async Task ASetStatusWithABadBody_Is400_AndTheServiceIsNotCalled(string json)
+    {
+        var response = await Send(HttpMethod.Put, $"/v1/members/{SomeMember}/status", json);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(_team.Calls);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"password":""}""")]
+    [InlineData("""{"password":"too short"}""")]
+    public async Task AnActivationWithABadPassword_Is400WithThePasswordField_AndTheServiceIsNotCalled(string json)
+    {
+        var response = await Send(HttpMethod.Post, $"/v1/members/invitations/{SomeInvitation}/activate", json);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True((await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors").TryGetProperty("password", out _));
+        Assert.Empty(_team.Calls);
+    }
+
+    [Fact]
+    public async Task AnActivation_Answers204WithNothingInTheBody_NotEvenThePassword()
+    {
+        var response = await CallAsync("activate an invitation", Token(OrganizationRole.OrganizationAdmin));
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(string.Empty, await response.Content.ReadAsStringAsync());
+        Assert.Equal("a default password", _team.LastActivationPassword);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AStatusChange_Answers204_AndPassesTheStateOn(bool isActive)
+    {
+        var response = await Send(HttpMethod.Put, $"/v1/members/{SomeMember}/status", $$"""{"isActive":{{(isActive ? "true" : "false")}}}""");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(isActive, _team.LastStatus);
+    }
+
+    [Theory]
     [InlineData("DELETE", "/v1/members/not-a-guid")]
     [InlineData("DELETE", "/v1/members/invitations/not-a-guid")]
     [InlineData("PUT", "/v1/members/not-a-guid/role")]
+    [InlineData("PUT", "/v1/members/not-a-guid/status")]
+    [InlineData("POST", "/v1/members/invitations/not-a-guid/activate")]
     public async Task AnIdThatIsNotAGuid_IsNotARoute(string method, string path)
     {
         var response = await Send(new HttpMethod(method), path, """{"role":"contentwriter"}""");
@@ -258,11 +310,13 @@ public sealed class MembersEndpointTests : IAsyncLifetime
 
         public IReadOnlyList<string> Calls => _calls;
         public string? LastInvitedEmail { get; private set; }
+        public string? LastActivationPassword { get; private set; }
+        public bool? LastStatus { get; private set; }
 
         public Task<TeamResponse> GetTeamAsync(CancellationToken cancellationToken)
         {
             _calls.Add("list");
-            var me = new TeamMemberResponse(Guid.NewGuid(), "me@example.com", "Me", OrganizationRole.OrganizationAdmin, DateTimeOffset.UtcNow, IsYou: true);
+            var me = new TeamMemberResponse(Guid.NewGuid(), "me@example.com", "Me", OrganizationRole.OrganizationAdmin, DateTimeOffset.UtcNow, IsYou: true, IsActive: true);
             return Task.FromResult(new TeamResponse([me], []));
         }
 
@@ -271,7 +325,7 @@ public sealed class MembersEndpointTests : IAsyncLifetime
             _calls.Add("invite");
             LastInvitedEmail = request.Email;
             var now = DateTimeOffset.UtcNow;
-            var invitation = new InvitationResponse(Guid.NewGuid(), request.Email!, OrganizationRole.ContentWriter, now, now.AddDays(7), IsExpired: false);
+            var invitation = new InvitationResponse(Guid.NewGuid(), request.FullName!, request.Email!, OrganizationRole.ContentWriter, now, now.AddDays(7), IsExpired: false);
             return Task.FromResult(new CreatedInvitationResponse(invitation, Secret));
         }
 
@@ -284,6 +338,20 @@ public sealed class MembersEndpointTests : IAsyncLifetime
         public Task ChangeRoleAsync(Guid memberUserId, ChangeMemberRoleRequest request, CancellationToken cancellationToken)
         {
             _calls.Add("change");
+            return Task.CompletedTask;
+        }
+
+        public Task ActivateInvitationAsync(Guid invitationId, ActivateInvitationRequest request, CancellationToken cancellationToken)
+        {
+            _calls.Add("activate");
+            LastActivationPassword = request.Password;
+            return Task.CompletedTask;
+        }
+
+        public Task SetMemberActiveAsync(Guid memberUserId, SetMemberActiveRequest request, CancellationToken cancellationToken)
+        {
+            _calls.Add("status");
+            LastStatus = request.IsActive;
             return Task.CompletedTask;
         }
 

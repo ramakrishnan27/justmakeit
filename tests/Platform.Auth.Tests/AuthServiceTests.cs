@@ -54,8 +54,8 @@ public sealed class AuthServiceTests
     };
 
     private static MembershipRecord Membership(
-        Guid agencyId, OrganizationRole role, string name = "Agency", BusinessModel businessModel = BusinessModel.Agency) =>
-        new() { AgencyId = agencyId, AgencyName = name, BusinessModel = businessModel, Role = role };
+        Guid agencyId, OrganizationRole role, string name = "Agency", BusinessModel businessModel = BusinessModel.Agency, bool isActive = true) =>
+        new() { AgencyId = agencyId, AgencyName = name, BusinessModel = businessModel, Role = role, IsActive = isActive };
 
     private void GivenUser(UserLoginRecord? user) =>
         _accounts.FindLoginByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(user);
@@ -301,6 +301,120 @@ public sealed class AuthServiceTests
             _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None));
 
         Assert.Equal("no_agency", exception.Code);
+    }
+
+    // --- A deactivated member --------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Login_WhenTheOnlyMembershipIsDeactivated_IsForbiddenAsDeactivated_AndIssuesNothing()
+    {
+        GivenUser(StoredUser());
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter, isActive: false));
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() =>
+            _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None));
+
+        Assert.Equal("account_deactivated", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+        await _memberships.DidNotReceiveWithAnyArgs().TouchAsync(default, default, default, default);
+    }
+
+    [Fact]
+    public async Task Login_SkipsADeactivatedMembership_AndUsesTheMostRecentActiveOne()
+    {
+        var deactivatedButRecent = Guid.NewGuid();
+        GivenUser(StoredUser());
+        GivenMemberships(
+            Membership(deactivatedButRecent, OrganizationRole.OrganizationAdmin, isActive: false),
+            Membership(_agencyId, OrganizationRole.ContentWriter));
+
+        await _service.LoginAsync(new LoginRequest("ana@example.com", Password, null), CancellationToken.None);
+
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.ContentWriter, Arg.Any<PermissionGrants>());
+    }
+
+    [Fact]
+    public async Task Login_ToTheDeactivatedOrganizationByName_IsForbiddenAsDeactivated_NotAsNotAMember()
+    {
+        var deactivated = Guid.NewGuid();
+        GivenUser(StoredUser());
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter), Membership(deactivated, OrganizationRole.ClientManager, isActive: false));
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() =>
+            _service.LoginAsync(new LoginRequest("ana@example.com", Password, deactivated), CancellationToken.None));
+
+        Assert.Equal("account_deactivated", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task Login_WithAWrongPassword_ForADeactivatedMember_IsTheSame401AsForAnyoneElse()
+    {
+        // The deactivation is said only after the password is right: it tells nobody that an address is a member.
+        GivenUser(StoredUser());
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter, isActive: false));
+
+        var exception = await AssertThrowsAsync<UnauthorizedException>(() =>
+            _service.LoginAsync(new LoginRequest("ana@example.com", "not the password", null), CancellationToken.None));
+
+        Assert.Equal("invalid_credentials", exception.Code);
+        await _memberships.DidNotReceiveWithAnyArgs().ListForUserAsync(default, default);
+    }
+
+    [Fact]
+    public async Task LoginExternal_ForADeactivatedMember_IsForbiddenAsDeactivated()
+    {
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter, isActive: false));
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() => _service.LoginExternalAsync(_userId, CancellationToken.None));
+
+        Assert.Equal("account_deactivated", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task SwitchAgency_ToADeactivatedMembership_IsForbiddenAsDeactivated_AndIssuesNothing()
+    {
+        var target = Guid.NewGuid();
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _memberships.FindAsync(_userId, target, Arg.Any<CancellationToken>()).Returns(Membership(target, OrganizationRole.ClientManager, isActive: false));
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() =>
+            _service.SwitchAgencyAsync(new SwitchAgencyRequest(target), CancellationToken.None));
+
+        Assert.Equal("account_deactivated", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task GetMe_LeavesADeactivatedMembershipOut_OfTheList()
+    {
+        var deactivated = Guid.NewGuid();
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>())
+            .Returns(new UserRecord { Id = _userId, Email = "ana@example.com", FullName = "Ana Smith" });
+        GivenMemberships(
+            Membership(_agencyId, OrganizationRole.ContentWriter, "Acme", BusinessModel.Company),
+            Membership(deactivated, OrganizationRole.ClientManager, "Other", BusinessModel.Agency, isActive: false));
+        _agencies.GetAsync(_agencyId, _userId, Arg.Any<CancellationToken>())
+            .Returns(new AgencyRecord { Id = _agencyId, Name = "Acme", BusinessModel = BusinessModel.Company, Plan = AgencyPlan.Trial });
+
+        var me = await _service.GetMeAsync(CancellationToken.None);
+
+        Assert.Equal([_agencyId], me.Memberships.Select(m => m.AgencyId));
+    }
+
+    [Fact]
+    public async Task GetMe_WhenTheCurrentMembershipHasBeenDeactivated_IsUnauthorized()
+    {
+        _tenant.Set(_agencyId, _userId, "organizationadmin");
+        _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>())
+            .Returns(new UserRecord { Id = _userId, Email = "ana@example.com", FullName = "Ana Smith" });
+        GivenMemberships(Membership(_agencyId, OrganizationRole.ContentWriter, isActive: false));
+
+        var exception = await AssertThrowsAsync<UnauthorizedException>(() => _service.GetMeAsync(CancellationToken.None));
+
+        Assert.Equal("membership_ended", exception.Code);
     }
 
     [Theory]

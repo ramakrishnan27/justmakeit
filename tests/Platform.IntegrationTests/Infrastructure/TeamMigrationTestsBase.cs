@@ -7,12 +7,12 @@ using Platform.Infrastructure.Data;
 namespace Platform.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// <c>007_team_members.sql</c>: invitations, the team functions and the session revocations. Everything is arranged
+/// <c>007_team_members.sql</c>: invitations, the team functions and the session revocations (008 is the other part of this class). Everything is arranged
 /// through <c>app_user</c> connections, the way the API does it (a new organization, its founder, an invitation, an
 /// acceptance), so the same tests run on a database owned by a superuser and on one owned by an ordinary role that
 /// row-level security binds (the two subclasses). Nothing is inserted behind the policies except where a test says so.
 /// </summary>
-public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncLifetime
+public abstract partial class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncLifetime
 {
     protected TestDatabase Db { get; private set; } = null!;
 
@@ -408,7 +408,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
         await using var admin = await AsAsync(a.AgencyId, a.AdminId);
         var team = (await admin.QueryAsync<(Guid UserId, string Email, string FullName, string Role)>(
-            "SELECT user_id, email, full_name, role FROM team_list_members()")).ToList();
+            "SELECT user_id, email, full_name, role FROM team_members_v2()")).ToList();
 
         Assert.Equal(2, team.Count);
         Assert.Contains(team, m => m.UserId == a.AdminId && m.Email == a.AdminEmail && m.Role == "organizationadmin" && m.FullName == "Founder");
@@ -425,9 +425,9 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
         string[] calls =
         [
-            "SELECT * FROM team_list_members()",
-            "SELECT team_change_role(@target, 'contentwriter')",
-            "SELECT team_remove_member(@target)"
+            "SELECT * FROM team_members_v2()",
+            "SELECT team_change_role_v2(@target, 'contentwriter')",
+            "SELECT team_remove_member_v2(@target)"
         ];
 
         foreach (var call in calls)
@@ -472,7 +472,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
         await using (var asManager = await AsAsync(org.AgencyId, manager))
         {
-            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role(@writer, 'marketingmanager')", new { writer });
+            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@writer, 'marketingmanager')", new { writer });
         }
 
         Assert.Equal("marketingmanager", await RoleOfAsync(org.AgencyId, writer));
@@ -481,7 +481,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         await owner.ExecuteAsync(
             "UPDATE role_permissions SET is_granted = false WHERE business_model = 'company' AND role = 'marketingmanager' AND permission_key = 'members.manage'");
         await using var again = await AsAsync(org.AgencyId, manager);
-        await AssertRefusedAsync(() => again.ExecuteScalarAsync<object>("SELECT * FROM team_list_members()"), PostgresErrorCodes.InsufficientPrivilege);
+        await AssertRefusedAsync(() => again.ExecuteScalarAsync<object>("SELECT * FROM team_members_v2()"), PostgresErrorCodes.InsufficientPrivilege);
     }
 
     [Fact]
@@ -494,7 +494,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
         await using (var admin = await AsAsync(org.AgencyId, org.AdminId))
         {
-            await admin.ExecuteScalarAsync<object>("SELECT team_change_role(@member, 'clientmanager')", new { member });
+            await admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@member, 'clientmanager')", new { member });
         }
 
         Assert.Equal("clientmanager", await RoleOfAsync(org.AgencyId, member));
@@ -509,7 +509,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         var member = await AddMemberAsync(org, "contentwriter");
 
         await using var admin = await AsAsync(org.AgencyId, org.AdminId);
-        await admin.ExecuteScalarAsync<object>("SELECT team_change_role(@member, 'contentwriter')", new { member });
+        await admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@member, 'contentwriter')", new { member });
 
         Assert.Null(await RevokedAfterAsync(org.AgencyId, member));
     }
@@ -523,11 +523,11 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         var stranger = await AddMemberAsync(b, "contentwriter");
 
         await using var admin = await AsAsync(a.AgencyId, a.AdminId);
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role(@id, 'contentwriter')", new { id = a.AdminId }), "cannot_change_self");
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role(@id, 'contentwriter')", new { id = stranger }), "member_not_found");
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role(gen_random_uuid(), 'contentwriter')"), "member_not_found");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@id, 'contentwriter')", new { id = a.AdminId }), "cannot_change_self");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@id, 'contentwriter')", new { id = stranger }), "member_not_found");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(gen_random_uuid(), 'contentwriter')"), "member_not_found");
         await AssertRefusedAsync(
-            () => admin.ExecuteScalarAsync<object>("SELECT team_change_role(@member, 'clientmanager')", new { member }),
+            () => admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@member, 'clientmanager')", new { member }),
             PostgresErrorCodes.CheckViolation, "ck_agency_members_role_model");
 
         Assert.Equal("contentwriter", await RoleOfAsync(a.AgencyId, member));
@@ -549,17 +549,17 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         {
             await using var asManager = await AsAsync(org.AgencyId, manager);
             await AssertRuleAsync(
-                () => asManager.ExecuteScalarAsync<object>("SELECT team_change_role(@id, 'contentwriter')", new { id = org.AdminId }), "last_organization_admin");
+                () => asManager.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@id, 'contentwriter')", new { id = org.AdminId }), "last_organization_admin");
             await AssertRuleAsync(
-                () => asManager.ExecuteScalarAsync<object>("SELECT team_remove_member(@id)", new { id = org.AdminId }), "last_organization_admin");
+                () => asManager.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@id)", new { id = org.AdminId }), "last_organization_admin");
             Assert.Equal("organizationadmin", await RoleOfAsync(org.AgencyId, org.AdminId));
             Assert.Null(await RevokedAfterAsync(org.AgencyId, org.AdminId));
 
             // With a second admin the first may be demoted, and then removing the second is the refused one.
-            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role(@writer, 'organizationadmin')", new { writer });
-            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role(@id, 'contentwriter')", new { id = org.AdminId });
+            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@writer, 'organizationadmin')", new { writer });
+            await asManager.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@id, 'contentwriter')", new { id = org.AdminId });
             await AssertRuleAsync(
-                () => asManager.ExecuteScalarAsync<object>("SELECT team_remove_member(@writer)", new { writer }), "last_organization_admin");
+                () => asManager.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@writer)", new { writer }), "last_organization_admin");
             Assert.Equal("contentwriter", await RoleOfAsync(org.AgencyId, org.AdminId));
         }
         finally
@@ -581,7 +581,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
         await using (var admin = await AsAsync(org.AgencyId, org.AdminId))
         {
-            await admin.ExecuteScalarAsync<object>("SELECT team_remove_member(@member)", new { member });
+            await admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@member)", new { member });
         }
 
         await using var owner = await Db.OpenOwnerAsync();
@@ -614,8 +614,8 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         await owner.ExecuteAsync("INSERT INTO site_admins (user_id) VALUES (@siteAdminMember)", new { siteAdminMember });
 
         await using var admin = await AsAsync(org.AgencyId, org.AdminId);
-        await admin.ExecuteScalarAsync<object>("SELECT team_remove_member(@user)", new { user = elsewhere.AdminId });
-        await admin.ExecuteScalarAsync<object>("SELECT team_remove_member(@siteAdminMember)", new { siteAdminMember });
+        await admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@user)", new { user = elsewhere.AdminId });
+        await admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@siteAdminMember)", new { siteAdminMember });
 
         Assert.Equal(1, await owner.ExecuteScalarAsync<long>("SELECT count(*) FROM users WHERE id = @user", new { user = elsewhere.AdminId }));
         Assert.Equal(1, await owner.ExecuteScalarAsync<long>("SELECT count(*) FROM users WHERE id = @siteAdminMember", new { siteAdminMember }));
@@ -630,15 +630,15 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
         var stranger = await AddMemberAsync(b, "contentwriter");
 
         await using var admin = await AsAsync(a.AgencyId, a.AdminId);
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member(@id)", new { id = a.AdminId }), "cannot_change_self");
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member(@id)", new { id = stranger }), "member_not_found");
-        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member(gen_random_uuid())"), "member_not_found");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@id)", new { id = a.AdminId }), "cannot_change_self");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@id)", new { id = stranger }), "member_not_found");
+        await AssertRuleAsync(() => admin.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(gen_random_uuid())"), "member_not_found");
         Assert.Equal("contentwriter", await RoleOfAsync(b.AgencyId, stranger));
 
         var second = await AddMemberAsync(a, "contentwriter");
-        await admin.ExecuteScalarAsync<object>("SELECT team_change_role(@second, 'organizationadmin')", new { second });
+        await admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@second, 'organizationadmin')", new { second });
         await using var asSecond = await AsAsync(a.AgencyId, second);
-        await asSecond.ExecuteScalarAsync<object>("SELECT team_remove_member(@id)", new { id = a.AdminId });
+        await asSecond.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@id)", new { id = a.AdminId });
 
         Assert.Null(await RoleOfAsync(a.AgencyId, a.AdminId));
         Assert.Equal("organizationadmin", await RoleOfAsync(a.AgencyId, second));
@@ -653,7 +653,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
             var second = await AddMemberAsync(org, "contentwriter");
             await using (var founder = await AsAsync(org.AgencyId, org.AdminId))
             {
-                await founder.ExecuteScalarAsync<object>("SELECT team_change_role(@second, 'organizationadmin')", new { second });
+                await founder.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@second, 'organizationadmin')", new { second });
             }
 
             async Task<string> Remove(Guid caller, Guid target)
@@ -661,7 +661,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
                 try
                 {
                     await using var app = await AsAsync(org.AgencyId, caller);
-                    await app.ExecuteScalarAsync<object>("SELECT team_remove_member(@target)", new { target });
+                    await app.ExecuteScalarAsync<object>("SELECT team_remove_member_v2(@target)", new { target });
                     return "removed";
                 }
                 catch (PostgresException exception)
@@ -712,7 +712,7 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
             "INSERT INTO session_revocations (agency_id, user_id, valid_after) VALUES (@a, @old, now() - interval '100 days')", new { a = org.AgencyId, old });
 
         await using var admin = await AsAsync(org.AgencyId, org.AdminId);
-        await admin.ExecuteScalarAsync<object>("SELECT team_change_role(@member, 'marketingmanager')", new { member });
+        await admin.ExecuteScalarAsync<object>("SELECT team_change_role_v2(@member, 'marketingmanager')", new { member });
 
         Assert.Equal(0, await owner.ExecuteScalarAsync<long>("SELECT count(*) FROM session_revocations WHERE user_id = @old", new { old }));
         Assert.Equal(1, await owner.ExecuteScalarAsync<long>("SELECT count(*) FROM session_revocations WHERE user_id = @member", new { member }));
@@ -740,11 +740,17 @@ public abstract class TeamMigrationTestsBase(PostgresFixture postgres) : IAsyncL
 
     private static readonly string[] CallableByApp =
     [
-        "team_list_members()", "team_change_role(uuid, text)", "team_remove_member(uuid)", "auth_email_registered(text)",
-        "invitation_find(text)", "invitation_accept(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()"
+        "team_members_v2()", "team_change_role_v2(uuid, text)", "team_remove_member_v2(uuid)", "team_set_member_active(uuid, boolean)",
+        "team_activate_invitation(uuid, uuid, text)", "auth_email_registered(text)", "invitation_find(text)", "invitation_find_v2(text)",
+        "invitation_accept(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()"
     ];
 
-    private static readonly string[] InternalOnly = ["org_caller_holds(text)", "team_end_sessions(uuid, uuid)"];
+    // The 007 team functions are reached only through the 008 ones, which are definers too.
+    private static readonly string[] InternalOnly =
+    [
+        "org_caller_holds(text)", "org_caller_manages()", "team_end_sessions(uuid, uuid)",
+        "team_list_members()", "team_change_role(uuid, text)", "team_remove_member(uuid)"
+    ];
 
     [Fact]
     public async Task TheFunctions_AreDefinerFunctionsWithAFixedSearchPath_NotCallableByPublic()

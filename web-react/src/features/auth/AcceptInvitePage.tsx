@@ -69,6 +69,8 @@ export default function AcceptInvitePage() {
       (invitation) => {
         if (active) {
           setPreview({ status: 'ready', invitation });
+          // The name the admin typed is offered; the person may write it their own way.
+          setFullName((typed) => (typed.length > 0 ? typed : invitation.fullName));
         }
       },
       (failure: unknown) => {

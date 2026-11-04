@@ -2,7 +2,7 @@ using Platform.Helpers.Constants;
 
 namespace Platform.Auth.Models;
 
-/// <summary>One member of the organization's team, as <c>team_list_members()</c> returns them.</summary>
+/// <summary>One member of the organization's team, as <c>team_members_v2()</c> returns them.</summary>
 public sealed class TeamMemberRecord
 {
     public Guid UserId { get; set; }
@@ -10,12 +10,18 @@ public sealed class TeamMemberRecord
     public string FullName { get; set; } = string.Empty;
     public OrganizationRole Role { get; set; }
     public DateTimeOffset JoinedAt { get; set; }
+
+    /// <summary>False when the person has been deactivated: they keep their place in the team but cannot sign in.</summary>
+    public bool IsActive { get; set; } = true;
 }
 
 /// <summary>An invitation that has not been accepted or revoked yet. It may have expired.</summary>
 public sealed class InvitationRecord
 {
     public Guid Id { get; set; }
+
+    /// <summary>The name the admin typed. Empty for an invitation made before names were asked for.</summary>
+    public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public OrganizationRole Role { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -27,6 +33,7 @@ public sealed record NewInvitation(
     Guid Id,
     Guid AgencyId,
     BusinessModel BusinessModel,
+    string FullName,
     string Email,
     OrganizationRole Role,
     string TokenHash,
@@ -47,6 +54,9 @@ public sealed class InvitationPreviewRecord
     public string Email { get; set; } = string.Empty;
     public OrganizationRole Role { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
+
+    /// <summary>The name the admin typed, to offer on the page. Empty for an older invitation.</summary>
+    public string FullName { get; set; } = string.Empty;
 }
 
 /// <summary>Where an accepted invitation put the new member.</summary>

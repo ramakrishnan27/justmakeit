@@ -4,10 +4,12 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { messageForTeamActionError } from '@/lib/messages';
 import { roleTitle, rolesFor } from '@/lib/roles';
 import type { Feedback } from './feedback';
-import { dateText, displayName, statusTitle, type RowStatus, type TeamRow } from './teamRows';
+import { createdText, displayName, expiryText, statusTitle, type RowStatus, type TeamRow } from './teamRows';
 import type { TeamActions } from './useTeam';
 
-const statusTones: Record<RowStatus, BadgeTone> = { active: 'paid', invited: 'trial', expired: 'danger' };
+const statusTones: Record<RowStatus, BadgeTone> = { active: 'paid', inactive: 'muted', invited: 'trial', expired: 'danger' };
+
+type Confirming = 'delete' | 'deactivate' | null;
 
 interface RowProps {
   row: TeamRow;
@@ -16,13 +18,15 @@ interface RowProps {
   onToggle: (row: TeamRow) => void;
   actions: TeamActions;
   onFeedback: (feedback: Feedback | null) => void;
+  /** Opens the dialog that asks for a default password: an invited person is activated by hand. */
+  onActivate: (row: TeamRow) => void;
   /** Called after a row went away, so the page can put keyboard focus somewhere that still exists. */
   onRemoved: () => void;
 }
 
-function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRemoved }: RowProps) {
+function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onActivate, onRemoved }: RowProps) {
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<Confirming>(null);
   const [pendingRole, setPendingRole] = useState<OrganizationRole | null>(null);
   const name = displayName(row);
   const roles = rolesFor(model);
@@ -44,19 +48,38 @@ function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRe
     }
   }
 
+  async function setActive(isActive: boolean) {
+    onFeedback(null);
+    setBusy(true);
+    try {
+      await actions.setActive(row.id, isActive);
+      onFeedback({
+        tone: 'success',
+        text: isActive ? `${name} is active again and can sign in.` : `${name} was deactivated and signed out. They cannot sign in until you activate them.`,
+      });
+    } catch (error) {
+      onFeedback({ tone: 'error', text: messageForTeamActionError(error) });
+    } finally {
+      setBusy(false);
+      setConfirming(null);
+    }
+  }
+
   async function remove() {
     onFeedback(null);
     setBusy(true);
     const [failure] = await actions.removeRows([row]);
     setBusy(false);
-    setConfirming(false);
+    setConfirming(null);
     if (failure) {
       onFeedback({ tone: 'error', text: messageForTeamActionError(failure.error) });
       return;
     }
-    onFeedback({ tone: 'success', text: row.kind === 'member' ? `${name} was removed.` : `The invitation for ${row.email} was cancelled.` });
+    onFeedback({ tone: 'success', text: row.kind === 'member' ? `${name} was deleted.` : `The invitation for ${row.email} was deleted.` });
     onRemoved();
   }
+
+  const expiry = expiryText(row);
 
   return (
     <tr role="row" className={checked ? 'is-selected' : undefined}>
@@ -67,7 +90,7 @@ function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRe
             aria-label={`Select ${name}`}
             checked={checked}
             disabled={row.isYou || busy}
-            title={row.isYou ? 'You cannot remove yourself.' : undefined}
+            title={row.isYou ? 'You cannot change or delete yourself.' : undefined}
             onChange={() => onToggle(row)}
           />
         </label>
@@ -75,7 +98,7 @@ function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRe
 
       <th role="rowheader" scope="row" className="cell-name">
         <span className="employee-name">
-          {row.name.trim().length > 0 ? row.name : row.email}
+          {displayName(row)}
           {row.isYou ? <Badge tone="accent">You</Badge> : null}
         </span>
         {row.name.trim().length > 0 ? <span className="employee-email">{row.email}</span> : null}
@@ -102,28 +125,52 @@ function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRe
 
       <td role="cell" className="cell-status">
         <Badge tone={statusTones[row.status]}>{statusTitle(row.status)}</Badge>
-        <span className="status-date">{dateText(row)}</span>
+        {expiry ? <span className="status-date">{expiry}</span> : null}
+      </td>
+
+      <td role="cell" className="cell-created">
+        <span className="created-label">Created </span>
+        {createdText(row)}
       </td>
 
       <td role="cell" className="cell-actions">
-        {row.isYou ? null : row.kind === 'invitation' ? (
-          <button className="row-action" type="button" disabled={busy} aria-label={`Cancel invitation for ${row.email}`} onClick={() => void remove()}>
-            Cancel invite
-          </button>
-        ) : confirming ? (
-          <span className="row-confirm" role="group" aria-label={`Confirm removing ${name}`}>
-            <span>Remove?</span>
-            <button className="row-action row-action-danger" type="button" disabled={busy} aria-label={`Yes, remove ${name}`} onClick={() => void remove()}>
-              Yes, remove
+        {row.isYou ? null : confirming ? (
+          <span className="row-confirm" role="group" aria-label={`Confirm: ${confirming} ${name}`}>
+            <span>{confirming === 'delete' ? 'Delete?' : 'Deactivate?'}</span>
+            <button
+              className="row-action row-action-danger"
+              type="button"
+              disabled={busy}
+              aria-label={`Yes, ${confirming} ${name}`}
+              onClick={() => void (confirming === 'delete' ? remove() : setActive(false))}
+            >
+              {confirming === 'delete' ? 'Yes, delete' : 'Yes, deactivate'}
             </button>
-            <button className="row-action" type="button" disabled={busy} onClick={() => setConfirming(false)}>
+            <button className="row-action" type="button" disabled={busy} onClick={() => setConfirming(null)}>
               Cancel
             </button>
           </span>
         ) : (
-          <button className="row-action" type="button" disabled={busy} aria-label={`Remove ${name}`} onClick={() => setConfirming(true)}>
-            Remove
-          </button>
+          <span className="row-actions">
+            {row.status === 'active' ? (
+              <button className="row-action" type="button" disabled={busy} aria-label={`Deactivate ${name}`} onClick={() => setConfirming('deactivate')}>
+                Deactivate
+              </button>
+            ) : null}
+            {row.status === 'inactive' ? (
+              <button className="row-action" type="button" disabled={busy} aria-label={`Activate ${name}`} onClick={() => void setActive(true)}>
+                Activate
+              </button>
+            ) : null}
+            {row.kind === 'invitation' ? (
+              <button className="row-action" type="button" disabled={busy} aria-label={`Activate ${name}`} onClick={() => onActivate(row)}>
+                Activate
+              </button>
+            ) : null}
+            <button className="row-action" type="button" disabled={busy} aria-label={`Delete ${name}`} onClick={() => setConfirming('delete')}>
+              Delete
+            </button>
+          </span>
         )}
       </td>
     </tr>
@@ -132,8 +179,9 @@ function TeamTableRow({ row, model, checked, onToggle, actions, onFeedback, onRe
 
 /**
  * The people and the waiting invitations, as the table in the design: a tick box for each row (and one for all), the
- * person with their address, their role (changed right here), their status with the date, and what can be done to the row.
- * Below 1024 px each row becomes a small card, so nothing needs sideways scrolling to reach a role or a button.
+ * person with their address, their role (changed right here), their status, the date they were created, and what can
+ * be done to the row: activate or deactivate, delete. Below 76 rem each row becomes a small card, so nothing needs
+ * sideways scrolling to reach a role or a button.
  */
 export function TeamTable({
   rows,
@@ -142,6 +190,7 @@ export function TeamTable({
   onSelect,
   actions,
   onFeedback,
+  onActivate,
   onRemoved,
   region,
 }: {
@@ -151,6 +200,7 @@ export function TeamTable({
   onSelect: (next: Set<string>) => void;
   actions: TeamActions;
   onFeedback: (feedback: Feedback | null) => void;
+  onActivate: (row: TeamRow) => void;
   onRemoved: () => void;
   region: Ref<HTMLDivElement>;
 }) {
@@ -209,6 +259,9 @@ export function TeamTable({
             <th role="columnheader" scope="col" className="cell-status">
               Status
             </th>
+            <th role="columnheader" scope="col" className="cell-created">
+              Created
+            </th>
             <th role="columnheader" scope="col" className="cell-actions">
               <span className="visually-hidden">Actions</span>
             </th>
@@ -224,6 +277,7 @@ export function TeamTable({
               onToggle={toggle}
               actions={actions}
               onFeedback={onFeedback}
+              onActivate={onActivate}
               onRemoved={onRemoved}
             />
           ))}

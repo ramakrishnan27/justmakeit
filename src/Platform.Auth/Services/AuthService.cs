@@ -114,11 +114,21 @@ public sealed class AuthService(
             throw new ForbiddenException("This account does not belong to any organization.", "no_agency");
         }
 
+        // A deactivated membership cannot be signed in to. This is said only now, after the password (or the Google
+        // sign-in) has been verified, so it tells nobody that an address is a member.
+        var usable = userMemberships.Where(m => m.IsActive).ToList();
+        if (usable.Count == 0)
+        {
+            throw Deactivated();
+        }
+
         // The list is ordered most recently used first, so the first entry is the default.
         var membership = requestedAgencyId is { } requested
-            ? userMemberships.FirstOrDefault(m => m.AgencyId == requested)
-              ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member")
-            : userMemberships[0];
+            ? usable.FirstOrDefault(m => m.AgencyId == requested)
+              ?? (userMemberships.Any(m => m.AgencyId == requested)
+                  ? throw Deactivated()
+                  : throw new ForbiddenException("You are not a member of that organization.", "not_a_member"))
+            : usable[0];
 
         var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
 
@@ -137,6 +147,10 @@ public sealed class AuthService(
 
         var membership = await memberships.FindAsync(userId, targetAgencyId, cancellationToken)
                          ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member");
+        if (!membership.IsActive)
+        {
+            throw Deactivated();
+        }
 
         var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
 
@@ -154,9 +168,10 @@ public sealed class AuthService(
 
         var user = await accounts.GetUserAsync(userId, cancellationToken)
                    ?? throw new UnauthorizedException("The account no longer exists.", "unknown_user");
-        var all = await memberships.ListForUserAsync(userId, cancellationToken);
+        var all = (await memberships.ListForUserAsync(userId, cancellationToken)).Where(m => m.IsActive).ToList();
 
-        // The token can outlive a membership by up to its lifetime; the database has the final say.
+        // The token can outlive a membership by up to its lifetime; the database has the final say. A deactivated one
+        // has ended too (its sessions are voided when it is deactivated; this covers a token issued in the same second).
         var current = all.FirstOrDefault(m => m.AgencyId == agencyId)
                       ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
         var agency = await agencies.GetAsync(agencyId, userId, cancellationToken)
@@ -175,7 +190,7 @@ public sealed class AuthService(
 
         var found = await invitations.FindAsync(HashHelper.Sha256Hex(request.Token!.Trim()), cancellationToken)
                     ?? throw InvitationErrors.Invalid();
-        return new InvitationPreviewResponse(found.OrganizationName, found.BusinessModel, found.Role, found.Email, found.ExpiresAt);
+        return new InvitationPreviewResponse(found.OrganizationName, found.BusinessModel, found.Role, found.Email, found.ExpiresAt, found.FullName);
     }
 
     public async Task<AuthResult> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken cancellationToken)
@@ -199,6 +214,9 @@ public sealed class AuthService(
             userId, accepted.AgencyId, accepted.Role, found.Id);
         return BuildResult(userId, accepted.AgencyId, accepted.Role, grants);
     }
+
+    private static ForbiddenException Deactivated() =>
+        new("Your account has been deactivated. Ask your organization admin to activate it.", "account_deactivated");
 
     // The one place a member's access token is made: register, login, switch-agency, an accepted invitation and Google all
     // end here, each with the permissions its caller read for the member's role. Nothing is stored:
