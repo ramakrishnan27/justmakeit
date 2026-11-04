@@ -8,7 +8,9 @@ import {
   messageForTeamActionError,
   messageForSignInError,
   messageForTeamLoadError,
+  problemForChangePasswordError,
   validateAcceptance,
+  validateChangePassword,
   validateDefaultPassword,
   validateInvite,
 } from './messages';
@@ -89,6 +91,48 @@ describe('a deactivated account at sign-in', () => {
 
     expect(messageForSignInError(deactivated)).toBe('Your account has been deactivated. Ask your organization admin to activate it.');
     expect(messageForSignInError(new ApiError(401, 'x', { code: 'invalid_credentials' }))).toBe('Email or password is incorrect.');
+  });
+});
+
+describe('validateChangePassword', () => {
+  const form = { current: 'current one 1', next: 'a brand new password', confirm: 'a brand new password' };
+
+  it('asks for the current password, a new one of 10 to 128 characters that is not the current one, and the same again, in that order', () => {
+    expect(validateChangePassword({ ...form, current: '' })).toEqual({ field: 'currentPassword', message: 'Enter your current password.' });
+    expect(validateChangePassword({ ...form, next: 'short', confirm: 'short' })).toEqual({
+      field: 'newPassword',
+      message: 'Choose a password of at least 10 characters.',
+    });
+    expect(validateChangePassword({ ...form, next: 'p'.repeat(129), confirm: 'p'.repeat(129) })?.field).toBe('newPassword');
+    expect(validateChangePassword({ ...form, next: form.current, confirm: form.current })).toEqual({
+      field: 'newPassword',
+      message: 'Choose a password you are not using now.',
+    });
+    expect(validateChangePassword({ ...form, confirm: 'another one entirely' })).toEqual({
+      field: 'confirmPassword',
+      message: 'The two new passwords do not match.',
+    });
+    expect(validateChangePassword(form)).toBeNull();
+  });
+});
+
+describe('problemForChangePasswordError', () => {
+  const failure = (status: number, code: string | null = null, errors: Record<string, string[]> | null = null) => new ApiError(status, 'x', { code, errors });
+
+  it('puts a field error on its field, in the server words', () => {
+    expect(problemForChangePasswordError(failure(400, null, { currentPassword: ['Current password is incorrect.'] }))).toEqual({
+      field: 'currentPassword',
+      message: 'Current password is incorrect.',
+    });
+    expect(problemForChangePasswordError(failure(400, null, { newPassword: ['Choose a password you are not using now.'] })).field).toBe('newPassword');
+  });
+
+  it('explains the other answers without naming a field', () => {
+    expect(problemForChangePasswordError(failure(409, 'no_password'))).toEqual({ field: '', message: 'This account signs in with Google and has no password to change.' });
+    expect(problemForChangePasswordError(failure(409, 'password_changed')).message).toMatch(/changed somewhere else/);
+    expect(problemForChangePasswordError(failure(429)).message).toMatch(/Too many requests/);
+    expect(problemForChangePasswordError(failure(500)).message).toBe('The password could not be changed. Try again in a moment.');
+    expect(problemForChangePasswordError(new Error('offline'))).toEqual({ field: '', message: 'Could not reach the server. Check your connection and try again.' });
   });
 });
 

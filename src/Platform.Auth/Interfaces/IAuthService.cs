@@ -24,6 +24,13 @@ public interface IAuthService
     Task<MeResponse> GetMeAsync(CancellationToken cancellationToken);
 
     /// <summary>
+    /// Changes the signed-in person's own password after checking the current one, ends every other session of theirs and
+    /// returns a fresh token for this one. A wrong current password is a field error (400), never a 401, which the web
+    /// client reads as the end of the session. Throws a conflict (no_password) for an account that signs in with Google.
+    /// </summary>
+    Task<AuthResult> ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
     /// What the invitation page shows for the secret in a link. Throws <c>NotFoundException</c> (invitation_invalid) for a
     /// link that never existed, was used, was revoked or ran out, so a guess learns nothing.
     /// </summary>

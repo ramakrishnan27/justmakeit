@@ -78,7 +78,7 @@ export function ActivateDialog({
         />
 
         <p className="muted small">
-          You will know this password, so tell it to {name} privately. There is no screen yet where they can change it.
+          You will know this password, so tell it to {name} privately. They can change it themselves under Account.
         </p>
 
         <FormError id="activate-error" message={error} />

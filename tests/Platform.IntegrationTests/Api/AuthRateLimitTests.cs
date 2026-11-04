@@ -55,6 +55,21 @@ public sealed class AuthRateLimitTests
     }
 
     [Fact]
+    public async Task ChangePassword_ChecksAPassword_SoItSharesTheCredentialsBudgetWithLogin()
+    {
+        await using var host = StartHost(credentials: 3);
+        var token = host.Factory.CreateAccessToken(Guid.NewGuid(), Guid.NewGuid(), Platform.Helpers.Constants.OrganizationRole.OrganizationAdmin);
+
+        // A body with nothing in it is refused before any query runs, so no database is involved.
+        Assert.Equal(HttpStatusCode.BadRequest, (await host.PostAsync("/v1/auth/change-password", new { }, tokenCookie: token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await BadLogin(host)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await host.PostAsync("/v1/auth/change-password", new { }, tokenCookie: token)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await host.PostAsync("/v1/auth/change-password", new { }, tokenCookie: token)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await BadLogin(host)).StatusCode);
+    }
+
+    [Fact]
     public async Task Register_AndLogin_ShareOneCredentialsBudget()
     {
         await using var host = StartHost(credentials: 3);

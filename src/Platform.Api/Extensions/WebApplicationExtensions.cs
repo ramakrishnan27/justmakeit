@@ -14,7 +14,7 @@ public static class WebApplicationExtensions
     /// under /admin. A page that a menu item links to needs its address here, or reloading it would answer 404; a test
     /// checks that every address in <c>menu_pages</c> serves the app shell.
     /// </summary>
-    private static readonly string[] MemberAppPages = ["login", "register", "dashboard", "workspaces", "team", "accept-invite"];
+    private static readonly string[] MemberAppPages = ["login", "register", "dashboard", "workspaces", "team", "accept-invite", "account"];
 
     /// <summary>
     /// Runs before the first request: stops the app on invalid configuration, then applies migrations

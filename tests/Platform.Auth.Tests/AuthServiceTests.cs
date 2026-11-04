@@ -23,6 +23,7 @@ public sealed class AuthServiceTests
     private readonly IInvitationRepository _invitations = Substitute.For<IInvitationRepository>();
     private readonly IAccessTokenIssuer _accessTokens = Substitute.For<IAccessTokenIssuer>();
     private readonly IPermissionService _permissions = Substitute.For<IPermissionService>();
+    private readonly ISessionRevocationService _revocations = Substitute.For<ISessionRevocationService>();
     private readonly Pbkdf2PasswordHasher _hasher = new(iterations: 1_000);
     private readonly TenantContext _tenant = new();
     private readonly FixedTimeProvider _time = FixedTimeProvider.Create();
@@ -39,7 +40,7 @@ public sealed class AuthServiceTests
             .Returns(call => new PermissionGrants(7, [$"granted-to-{call.ArgAt<OrganizationRole>(1).ToDb()}"]));
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(true);
 
-        _service = new AuthService(_accounts, _memberships, _agencies, _invitations, _hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
+        _service = new AuthService(_accounts, _memberships, _agencies, _invitations, _hasher, _accessTokens, _permissions, _revocations, _tenant, _time, NullLogger<AuthService>.Instance);
     }
 
     private static RegisterRequest ValidRegistration(string businessModel = "agency") =>
@@ -271,7 +272,7 @@ public sealed class AuthServiceTests
     {
         var hasher = Substitute.For<IPasswordHasher>();
         hasher.DummyHash.Returns("pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==");
-        var service = new AuthService(_accounts, _memberships, _agencies, _invitations, hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
+        var service = new AuthService(_accounts, _memberships, _agencies, _invitations, hasher, _accessTokens, _permissions, _revocations, _tenant, _time, NullLogger<AuthService>.Instance);
         GivenUser(null);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>
@@ -739,5 +740,174 @@ public sealed class AuthServiceTests
 
         Assert.Equal("no_agency", exception.Code);
         _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    // --- Changing your own password ----------------------------------------------------------------------------
+
+    private const string NewPassword = "a brand new password";
+
+    /// <summary>A signed-in person whose account has this password hash, and an active membership in the current organization.</summary>
+    private string GivenAnAccountWithAPassword(string? current = Password)
+    {
+        _tenant.Set(_agencyId, _userId, "marketingmanager");
+        var hash = current is null ? null : _hasher.Hash(current);
+        _accounts.GetUserAsync(_userId, Arg.Any<CancellationToken>())
+            .Returns(new UserRecord { Id = _userId, Email = "ana@example.com", FullName = "Ana Smith" });
+        _accounts.GetPasswordHashAsync(_userId, Arg.Any<CancellationToken>()).Returns(hash);
+        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>()).Returns(Membership(_agencyId, OrganizationRole.MarketingManager));
+        return hash!;
+    }
+
+    [Fact]
+    public async Task ChangePassword_StoresTheHashOfTheNewPassword_EndsOtherSessions_AndIssuesAFreshTokenForThisOne()
+    {
+        var stored = GivenAnAccountWithAPassword();
+        string? newHash = null;
+        _accounts.ChangePasswordAsync(_userId, stored, Arg.Do<string>(hash => newHash = hash), Arg.Any<CancellationToken>()).Returns(true);
+
+        var result = await _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None);
+
+        Assert.NotNull(newHash);
+        Assert.NotEqual(NewPassword, newHash); // only a hash is stored
+        Assert.True(_hasher.Verify(NewPassword, newHash));
+        Assert.False(_hasher.Verify(Password, newHash));
+        _revocations.Received(1).Invalidate();
+        _accessTokens.Received(1).Issue(_userId, _agencyId, OrganizationRole.MarketingManager, Arg.Any<PermissionGrants>());
+        Assert.Equal("access-token", result.AccessToken);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ReadsThePermissionsBeforeItWritesAnything()
+    {
+        var stored = GivenAnAccountWithAPassword();
+        _accounts.ChangePasswordAsync(_userId, stored, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
+
+        await _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _permissions.GetGrantsAsync(BusinessModel.Agency, OrganizationRole.MarketingManager, Arg.Any<CancellationToken>());
+            _accounts.ChangePasswordAsync(_userId, stored, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAWrongCurrentPassword_IsAFieldError_NotA401_AndChangesNothing()
+    {
+        GivenAnAccountWithAPassword();
+
+        var exception = await AssertThrowsAsync<BadRequestException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest("not the password", NewPassword), CancellationToken.None));
+
+        Assert.Contains("currentPassword", exception.Errors!.Keys);
+        await _accounts.DidNotReceiveWithAnyArgs().ChangePasswordAsync(default, default!, default!, default);
+        _revocations.DidNotReceive().Invalidate();
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ToThePasswordYouHaveNow_IsAFieldError_AndChangesNothing()
+    {
+        GivenAnAccountWithAPassword();
+
+        var exception = await AssertThrowsAsync<BadRequestException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, Password), CancellationToken.None));
+
+        Assert.Contains("newPassword", exception.Errors!.Keys);
+        await _accounts.DidNotReceiveWithAnyArgs().ChangePasswordAsync(default, default!, default!, default);
+    }
+
+    [Theory]
+    [InlineData("", NewPassword, "currentPassword")]
+    [InlineData(Password, "", "newPassword")]
+    [InlineData(Password, "too short", "newPassword")]
+    public async Task ChangePassword_WithInvalidInput_IsABadRequest_WithoutLookingAnythingUp(string current, string next, string field)
+    {
+        GivenAnAccountWithAPassword();
+
+        var exception = await AssertThrowsAsync<BadRequestException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(current, next), CancellationToken.None));
+
+        Assert.Contains(field, exception.Errors!.Keys);
+        Assert.Empty(_accounts.ReceivedCalls());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task ChangePassword_ForAnAccountThatSignsInWithGoogle_IsAConflict_NoPassword(string? stored)
+    {
+        GivenAnAccountWithAPassword(current: null);
+        _accounts.GetPasswordHashAsync(_userId, Arg.Any<CancellationToken>()).Returns(stored);
+
+        var exception = await AssertThrowsAsync<ConflictException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        Assert.Equal("no_password", exception.Code);
+        await _accounts.DidNotReceiveWithAnyArgs().ChangePasswordAsync(default, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WhenThePasswordChangedMeanwhile_IsAConflict_IssuesNothing_AndForgetsWhatIsHeld()
+    {
+        var stored = GivenAnAccountWithAPassword();
+        _accounts.ChangePasswordAsync(_userId, stored, Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(false);
+
+        var exception = await AssertThrowsAsync<ConflictException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        Assert.Equal("password_changed", exception.Code);
+        _accessTokens.DidNotReceiveWithAnyArgs().Issue(default, default, default, default!);
+        _revocations.Received(1).Invalidate();
+    }
+
+    [Fact]
+    public async Task ChangePassword_ForgetsWhatIsHeldEvenWhenTheWriteFailed()
+    {
+        var stored = GivenAnAccountWithAPassword();
+        _accounts.ChangePasswordAsync(_userId, stored, Arg.Any<string>(), Arg.Any<CancellationToken>()).ThrowsForAnyArgs(new InvalidOperationException("database down"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        _revocations.Received(1).Invalidate();
+    }
+
+    [Fact]
+    public async Task ChangePassword_ByADeactivatedMember_IsForbiddenAsDeactivated_AndChangesNothing()
+    {
+        GivenAnAccountWithAPassword();
+        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>())
+            .Returns(Membership(_agencyId, OrganizationRole.MarketingManager, isActive: false));
+
+        var exception = await AssertThrowsAsync<ForbiddenException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        Assert.Equal("account_deactivated", exception.Code);
+        await _accounts.DidNotReceiveWithAnyArgs().ChangePasswordAsync(default, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ByAPersonWhoLeftTheOrganization_IsUnauthorized_AndChangesNothing()
+    {
+        GivenAnAccountWithAPassword();
+        _memberships.FindAsync(_userId, _agencyId, Arg.Any<CancellationToken>()).Returns((MembershipRecord?)null);
+
+        var exception = await AssertThrowsAsync<UnauthorizedException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        Assert.Equal("membership_ended", exception.Code);
+        await _accounts.DidNotReceiveWithAnyArgs().ChangePasswordAsync(default, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithoutASignedInUserOrOrganization_IsUnauthorized()
+    {
+        _tenant.Set(null, null, null);
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            _service.ChangePasswordAsync(new ChangePasswordRequest(Password, NewPassword), CancellationToken.None));
+
+        Assert.Empty(_accounts.ReceivedCalls());
     }
 }

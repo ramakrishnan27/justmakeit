@@ -43,6 +43,7 @@ public sealed class InvitationAcceptanceTests
             _hasher,
             _accessTokens,
             _permissions,
+            Substitute.For<ISessionRevocationService>(),
             new TenantContext(),
             _time,
             NullLogger<AuthService>.Instance);

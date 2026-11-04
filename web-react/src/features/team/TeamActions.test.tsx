@@ -552,7 +552,7 @@ describe('activating an invited person by hand', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Activate Dev Kumar' });
     expect(within(dialog).getByText(/sign in as dev@example.com with it straight away, and the invitation link stops working/)).toBeTruthy();
-    expect(within(dialog).getByText(/You will know this password.*There is no screen yet where they can change it/)).toBeTruthy();
+    expect(within(dialog).getByText(/You will know this password.*They can change it themselves under Account/)).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByLabelText('Default password')));
     expect((within(dialog).getByLabelText('Default password') as HTMLInputElement).type).toBe('password');
   });

@@ -524,6 +524,8 @@ fieldset.field label.choice {
 
 .shell-close { align-self: flex-end; }
 
+.nav-account { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--sidebar-border); }
+.account-card { max-width: 28rem; }
 .nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .nav-empty { padding: 8px 12px; }
 

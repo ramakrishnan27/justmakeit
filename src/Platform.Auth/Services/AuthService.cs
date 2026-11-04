@@ -17,6 +17,7 @@ public sealed class AuthService(
     IPasswordHasher passwordHasher,
     IAccessTokenIssuer accessTokens,
     IPermissionService permissions,
+    ISessionRevocationService revocations,
     ITenantContext tenant,
     TimeProvider time,
     ILogger<AuthService> logger) : IAuthService
@@ -182,6 +183,72 @@ public sealed class AuthService(
             new AgencyDto(agency.Id, agency.Name, agency.BusinessModel, agency.Plan),
             current.Role,
             all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.BusinessModel, m.Role)).ToList());
+    }
+
+    public async Task<AuthResult> ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        var userId = tenant.RequireUserId();
+        var agencyId = tenant.RequireAgencyId();
+
+        if (request.CurrentPassword == request.NewPassword)
+        {
+            FieldProblem("newPassword", "Choose a password you are not using now.");
+        }
+
+        _ = await accounts.GetUserAsync(userId, cancellationToken)
+            ?? throw new UnauthorizedException("The account no longer exists.", "unknown_user");
+
+        // A person who signs in with Google has no password to change.
+        var stored = await accounts.GetPasswordHashAsync(userId, cancellationToken);
+        if (string.IsNullOrEmpty(stored))
+        {
+            throw new ConflictException("This account signs in with Google and has no password to change.", "no_password");
+        }
+
+        // Always a field error, never a 401: the web client takes any 401 as the end of the session.
+        if (!passwordHasher.Verify(request.CurrentPassword!, stored))
+        {
+            FieldProblem("currentPassword", "Current password is incorrect.");
+        }
+
+        // Read before anything is written, as everywhere a token is made: a failure after the change would leave the
+        // person signed out of this session as well, with nothing to show for it.
+        var membership = await memberships.FindAsync(userId, agencyId, cancellationToken)
+                         ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
+        if (!membership.IsActive)
+        {
+            throw Deactivated();
+        }
+
+        var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
+
+        bool changed;
+        try
+        {
+            changed = await accounts.ChangePasswordAsync(userId, stored, passwordHasher.Hash(request.NewPassword!), cancellationToken);
+        }
+        finally
+        {
+            // The sessions end in the database; the list the API holds in memory must learn of it at once.
+            revocations.Invalidate();
+        }
+
+        if (!changed)
+        {
+            throw new ConflictException("Your password was changed somewhere else a moment ago. Try again.", "password_changed");
+        }
+
+        // Ids only: neither password is logged.
+        logger.LogInformation("User {UserId} changed their password and ended their other sessions", userId);
+        return BuildResult(userId, agencyId, membership.Role, grants);
+    }
+
+    private static void FieldProblem(string field, string message)
+    {
+        var errors = new Platform.Helpers.Validation.ValidationErrors();
+        errors.Add(field, message);
+        errors.ThrowIfAny();
     }
 
     public async Task<InvitationPreviewResponse> PreviewInvitationAsync(InvitationTokenRequest request, CancellationToken cancellationToken)

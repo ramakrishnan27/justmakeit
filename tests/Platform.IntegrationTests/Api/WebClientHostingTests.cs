@@ -44,6 +44,7 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     [InlineData("/workspaces")]
     [InlineData("/workspaces/")]
     [InlineData("/team")]
+    [InlineData("/account")]
     [InlineData("/team/")]
     [InlineData("/accept-invite")] // the invitation link; its secret is in the fragment, which the server never sees
     public async Task EveryClientSideAddress_AnswersWithTheAppShell_ToAVisitorWhoIsNotSignedIn(string path)
@@ -194,7 +195,7 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         foreach (var path in new[]
                  {
                      "/", "/admin", "/admin/login", "/admin/menus", "/admin/permissions", "/login", "/register", "/dashboard", "/workspaces",
-                     "/team", "/accept-invite", "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
+                     "/team", "/accept-invite", "/account", "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
                      "/js/pages/admin-login.js", "/js/pages/member-login.js", "/js/pages/member-register.js"
                  })
         {

@@ -278,6 +278,53 @@ export function validateDefaultPassword(password: string): FieldProblem | null {
   return null;
 }
 
+/** Checks the change-password form before anything is sent. @returns The first problem found, or null. */
+export function validateChangePassword({ current, next, confirm }: { current: string; next: string; confirm: string }): FieldProblem | null {
+  if (current.length === 0) {
+    return { field: 'currentPassword', message: 'Enter your current password.' };
+  }
+  if (next.length < minPasswordLength) {
+    return { field: 'newPassword', message: `Choose a password of at least ${minPasswordLength} characters.` };
+  }
+  if (next.length > 128) {
+    return { field: 'newPassword', message: 'The password must be at most 128 characters.' };
+  }
+  if (next === current) {
+    return { field: 'newPassword', message: 'Choose a password you are not using now.' };
+  }
+  if (confirm !== next) {
+    return { field: 'confirmPassword', message: 'The two new passwords do not match.' };
+  }
+  return null;
+}
+
+/**
+ * What to tell the person when changing the password failed, and which field it is about (empty when it is about none).
+ * A wrong current password arrives as a field error of the current password, never as a 401.
+ */
+export function problemForChangePasswordError(error: unknown): FieldProblem {
+  if (!(error instanceof ApiError)) {
+    return { field: '', message: offline };
+  }
+  if (error.status === 400 && error.errors) {
+    for (const [field, messages] of Object.entries(error.errors)) {
+      if (typeof messages[0] === 'string') {
+        return { field, message: messages[0] };
+      }
+    }
+  }
+  if (error.code === 'no_password') {
+    return { field: '', message: 'This account signs in with Google and has no password to change.' };
+  }
+  if (error.code === 'password_changed') {
+    return { field: '', message: 'Your password was changed somewhere else a moment ago. Try again.' };
+  }
+  if (error.status === 429) {
+    return { field: '', message: tooMany };
+  }
+  return { field: '', message: 'The password could not be changed. Try again in a moment.' };
+}
+
 /** What to show on the invitation page when the link could not be read. */
 export function messageForInvitationPreviewError(error: unknown): string {
   if (error instanceof ApiError) {

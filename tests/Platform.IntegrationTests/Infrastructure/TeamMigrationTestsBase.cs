@@ -742,7 +742,7 @@ public abstract partial class TeamMigrationTestsBase(PostgresFixture postgres) :
     [
         "team_members_v2()", "team_change_role_v2(uuid, text)", "team_remove_member_v2(uuid)", "team_set_member_active(uuid, boolean)",
         "team_activate_invitation(uuid, uuid, text)", "auth_email_registered(text)", "invitation_find(text)", "invitation_find_v2(text)",
-        "invitation_accept(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()"
+        "invitation_accept(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()", "auth_end_own_sessions()"
     ];
 
     // The 007 team functions are reached only through the 008 ones, which are definers too.

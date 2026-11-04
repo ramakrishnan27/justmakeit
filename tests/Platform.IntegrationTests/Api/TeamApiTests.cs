@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -466,29 +465,6 @@ public sealed partial class TeamApiTests(PostgresFixture postgres) : AuthApiTest
         foreach (var secret in new[] { token, email, email.ToUpperInvariant(), EmployeePassword, cookie, "a-guess-that-is-wrong" })
         {
             Assert.DoesNotContain(secret, everything, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        private readonly ConcurrentQueue<string> _messages = new();
-
-        public IReadOnlyCollection<string> Messages => _messages;
-
-        public ILogger CreateLogger(string categoryName) => new Capture(_messages);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class Capture(ConcurrentQueue<string> messages) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-                messages.Enqueue(formatter(state, exception) + (exception is null ? string.Empty : "\n" + exception));
         }
     }
 }

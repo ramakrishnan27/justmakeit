@@ -19,6 +19,19 @@ public interface IAccountRepository
     Task<UserRecord?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// The stored hash of the user's password, or null when they have none (a person who signs in with Google). A user
+    /// reads only their own row, so the connection acts as that user.
+    /// </summary>
+    Task<string?> GetPasswordHashAsync(Guid userId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the user's password hash, only if it is still <paramref name="expectedHash"/> (so two changes made at the
+    /// same moment cannot overwrite each other), and ends the user's other sessions in the same transaction. False, and
+    /// nothing changed, when the stored hash is no longer the expected one.
+    /// </summary>
+    Task<bool> ChangePasswordAsync(Guid userId, string expectedHash, string newHash, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Creates the user, organization (agency row), founder membership and first workspace in one transaction.
     /// Returns false, and creates nothing, when the email is already registered.
     /// </summary>

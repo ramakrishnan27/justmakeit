@@ -41,6 +41,39 @@ public sealed class AccountRepository(IDbConnectionFactory connections) : IAccou
             cancellationToken: cancellationToken));
     }
 
+    public async Task<string?> GetPasswordHashAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
+        return await connection.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT password_hash FROM users WHERE id = @userId",
+            new { userId },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task<bool> ChangePasswordAsync(Guid userId, string expectedHash, string newHash, CancellationToken cancellationToken)
+    {
+        // The row belongs to the user the connection acts for (self_access); ending their sessions is the one thing they
+        // may not write themselves, so it is auth_end_own_sessions(), in the same transaction as the new hash.
+        await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        var changed = await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET password_hash = @newHash WHERE id = @userId AND password_hash = @expectedHash",
+            new { userId, expectedHash, newHash },
+            transaction,
+            cancellationToken: cancellationToken));
+        if (changed == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return false;
+        }
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            "SELECT auth_end_own_sessions()", transaction: transaction, cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<bool> CreateAccountAsync(NewAccount account, CancellationToken cancellationToken)
     {
         // The connection is opened for the agency and user being created, so each row passes its own

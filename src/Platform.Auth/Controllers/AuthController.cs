@@ -100,6 +100,20 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
         return Issue(await auth.AcceptInvitationAsync(request, cancellationToken), StatusCodes.Status201Created);
     }
 
+    /// <summary>
+    /// The signed-in person changes their own password (the current one is asked for). Every other session of theirs ends;
+    /// the answer sets a fresh cookie for this one. A wrong current password is a 400 field error, not a 401.
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        return Issue(await auth.ChangePasswordAsync(request, cancellationToken), StatusCodes.Status200OK);
+    }
+
     /// <summary>The signed-in user, the current agency and role, every membership, and when the sign-in ends.</summary>
     [HttpGet("me")]
     [Authorize]

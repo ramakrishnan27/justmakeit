@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { GuestOnly, NotFoundRoute, RequireAuth, RequirePermission } from '@/access/RouteGuards';
 import { Loading } from '@/components/ui/Notice';
 import AcceptInvitePage from '@/features/auth/AcceptInvitePage';
+import AccountPage from '@/features/account/AccountPage';
 import LoginPage from '@/features/auth/LoginPage';
 import RegisterPage from '@/features/auth/RegisterPage';
 import { useApp } from '@/navigation/AppContext';
@@ -41,6 +42,8 @@ export function MemberRoutes() {
             }
           />
         ))}
+        {/* Behind sign-in but not in the menu, and for every member: it needs no permission, only the person themselves. */}
+        <Route path="/account" element={<AccountPage />} />
       </Route>
 
       <Route path="*" element={<NotFoundRoute />} />

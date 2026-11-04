@@ -25,32 +25,32 @@ internal static class FieldRules
         }
     }
 
-    public static void NewPassword(ValidationErrors errors, string? value)
+    public static void NewPassword(ValidationErrors errors, string? value, string field = "password")
     {
         if (string.IsNullOrEmpty(value))
         {
-            errors.Add("password", "Password is required.");
+            errors.Add(field, "Password is required.");
         }
         else if (value.Length < MinPasswordLength)
         {
-            errors.Add("password", $"Password must be at least {MinPasswordLength} characters.");
+            errors.Add(field, $"Password must be at least {MinPasswordLength} characters.");
         }
         else if (value.Length > MaxPasswordLength)
         {
-            errors.Add("password", $"Password must be at most {MaxPasswordLength} characters.");
+            errors.Add(field, $"Password must be at most {MaxPasswordLength} characters.");
         }
     }
 
     /// <summary>Login checks only that a usable password was sent, not the rules for choosing one.</summary>
-    public static void ExistingPassword(ValidationErrors errors, string? value)
+    public static void ExistingPassword(ValidationErrors errors, string? value, string field = "password")
     {
         if (string.IsNullOrEmpty(value))
         {
-            errors.Add("password", "Password is required.");
+            errors.Add(field, "Password is required.");
         }
         else if (value.Length > MaxPasswordLength)
         {
-            errors.Add("password", $"Password must be at most {MaxPasswordLength} characters.");
+            errors.Add(field, $"Password must be at most {MaxPasswordLength} characters.");
         }
     }
 

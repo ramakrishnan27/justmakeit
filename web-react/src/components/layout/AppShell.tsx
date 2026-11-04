@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
+import { Icon } from '@/components/icons/Icon';
 import { useApp } from '@/navigation/AppContext';
 import { useSignedIn } from '@/session/SessionContext';
 import { AppHeader } from './AppHeader';
@@ -20,7 +21,7 @@ const desktopQuery = '(min-width: 720px)';
  * From 720 px it is a column beside the page and the button is gone.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { menu } = useSignedIn();
+  const { menu, kind } = useSignedIn();
   const { pagePaths } = useApp();
   const { pathname } = useLocation();
   const wide = useMediaQuery(desktopQuery);
@@ -87,6 +88,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
           {/* Choosing a link closes the drawer; the page then moves focus to its own heading. */}
           <Menu label="Main" items={items} onNavigate={() => closeDrawer()} />
+          {/* The person's own account is not a page the Site admin configures, so it is not in the menu: a link of its own, members only. */}
+          {kind === 'member' ? (
+            <nav aria-label="Account" className="nav-account">
+              <NavLink className="nav-link" to="/account" end onClick={() => closeDrawer()}>
+                <Icon name="settings" />
+                <span>Account</span>
+              </NavLink>
+            </nav>
+          ) : null}
         </aside>
         <main id="main" className="shell-main" inert={drawerOpen}>
           <div className="container page">{children}</div>
