@@ -138,7 +138,7 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
             .ToList();
 
         Assert.Equal(8, slots.Count);
-        Assert.Equal(slots.Count * PermissionKeys.All.Count, rows.Count); // 8 slots by 6 keys = 48
+        Assert.Equal(slots.Count * PermissionKeys.All.Count, rows.Count); // 8 slots by 7 keys = 56
         foreach (var (model, role) in slots)
         {
             foreach (var key in PermissionKeys.All)
@@ -177,7 +177,8 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
                 "admin/menus /admin/menus [] Menus menu 20 visible=True locked=True",
                 "admin/permissions /admin/permissions [] Permissions shield 30 visible=True locked=True",
                 "member/dashboard /dashboard [dashboard.view] Dashboard home 10 visible=True locked=True",
-                "member/workspaces /workspaces [workspaces.view] Workspaces folder 20 visible=True locked=False"
+                "member/workspaces /workspaces [workspaces.view] Workspaces folder 20 visible=True locked=False",
+                "member/team /team [members.manage] Team users 30 visible=True locked=False"
             ],
             items.Select(i =>
                 $"{i.Menu}/{i.Page} {i.Path} [{i.Permission}] {i.Label} {i.Icon} {i.Sort} visible={i.Visible} locked={i.Locked}"));
@@ -237,10 +238,10 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
         }
 
         await using var signedIn = await _db.OpenAppAsync(null, Guid.NewGuid());
-        Assert.Equal(6, await DbTestSupport.CountAsync(signedIn, "permissions"));
-        Assert.Equal(48, await DbTestSupport.CountAsync(signedIn, "role_permissions"));
-        Assert.Equal(5, await DbTestSupport.CountAsync(signedIn, "menu_pages"));
-        Assert.Equal(5, await DbTestSupport.CountAsync(signedIn, "menu_items"));
+        Assert.Equal(7, await DbTestSupport.CountAsync(signedIn, "permissions"));
+        Assert.Equal(56, await DbTestSupport.CountAsync(signedIn, "role_permissions"));
+        Assert.Equal(6, await DbTestSupport.CountAsync(signedIn, "menu_pages"));
+        Assert.Equal(6, await DbTestSupport.CountAsync(signedIn, "menu_items"));
     }
 
     [Fact]
@@ -467,7 +468,7 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
         Assert.Equal(("Start", "menu"), await owner.QuerySingleAsync<(string, string)>(
             "SELECT label, icon FROM menu_items WHERE menu_key = 'member' AND page_key = 'dashboard'"));
         Assert.Equal(versionAfterEdits, await VersionAsync());
-        Assert.Equal(48, await DbTestSupport.CountAsync(owner, "role_permissions"));
+        Assert.Equal(56, await DbTestSupport.CountAsync(owner, "role_permissions"));
     }
 
     [Fact]
@@ -559,7 +560,7 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
         // Nothing was written.
         Assert.Equal(grantedBefore, await DbTestSupport.CountAsync(owner, "role_permissions WHERE is_granted"));
         Assert.Equal(versionBefore, await VersionAsync());
-        Assert.Equal(5, await DbTestSupport.CountAsync(owner, "menu_items"));
+        Assert.Equal(6, await DbTestSupport.CountAsync(owner, "menu_items"));
     }
 
     [Fact]
@@ -573,10 +574,10 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
         var menu = (await anonymous.QueryAsync<(string MenuKey, string PageKey, string Path, string Label, int SortOrder)>(
             "SELECT menu_key, page_key, path, label, sort_order FROM menu_snapshot()")).ToList();
 
-        Assert.Equal(48, grants.Count);
+        Assert.Equal(56, grants.Count);
         Assert.All(grants, g => Assert.Equal(version, g.Version));
         Assert.Equal(
-            ["/admin", "/admin/menus", "/admin/permissions", "/dashboard", "/workspaces"],
+            ["/admin", "/admin/menus", "/admin/permissions", "/dashboard", "/workspaces", "/team"],
             menu.Select(m => m.Path));
     }
 
@@ -609,7 +610,7 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
 
         var item = await app.QuerySingleAsync<(string Label, string Icon, int Sort, bool Visible, bool Locked)>(
             "SELECT label, icon, sort_order, is_visible, is_locked FROM menu_items WHERE id = @id", new { id });
-        Assert.Equal(("Our reports", "chart", 30, true, false), item);
+        Assert.Equal(("Our reports", "chart", 40, true, false), item); // after Dashboard 10, Workspaces 20 and Team 30
     }
 
     [Fact]
@@ -670,7 +671,7 @@ public sealed class MenuPermissionMigrationTests(PostgresFixture postgres) : IAs
             PostgresErrorCodes.RaiseException, "menu_item_locked");
         Assert.True(await app.ExecuteScalarAsync<bool>("SELECT site_admin_delete_menu_item(@id)", new { id = workspaces }));
         Assert.False(await app.ExecuteScalarAsync<bool>("SELECT site_admin_delete_menu_item(@id)", new { id = workspaces }));
-        Assert.Equal(4, await DbTestSupport.CountAsync(app, "menu_items"));
+        Assert.Equal(5, await DbTestSupport.CountAsync(app, "menu_items"));
     }
 
     [Fact]

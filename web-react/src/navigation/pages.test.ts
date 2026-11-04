@@ -4,10 +4,15 @@ import { readRepositoryFile } from '@/test/repo';
 import { adminPages } from './adminPages';
 import { pages } from './pages';
 
-// The pages a menu may link to are seeded by the database (005_menus_permissions.sql); the pages that exist are the
+// The pages a menu may link to are seeded by the database (005_menus_permissions.sql, and the Team page by 007_team_members.sql); the pages that exist are the
 // page table's rows. They must say the same thing, or a menu item would open a page the client does not have, or the
 // client would guard a page with another permission than the server's menu does. This reads the seed script and compares.
-const script = readRepositoryFile('src/Platform.Infrastructure/Migrations/005_menus_permissions.sql');
+const script = [
+  'src/Platform.Infrastructure/Migrations/005_menus_permissions.sql',
+  'src/Platform.Infrastructure/Migrations/007_team_members.sql',
+]
+  .map(readRepositoryFile)
+  .join('\n');
 
 // ('member', 'workspaces',  '/workspaces',  'Workspaces',  'workspaces.view',  'Workspaces', 'folder', 20, false)
 const seeded = [...script.matchAll(/\('(member|admin)',\s*'([a-z-]+)',\s*'(\/[^']*)',\s*'[^']*',\s*(NULL|'[^']*')/g)].map((match) => ({
@@ -21,7 +26,7 @@ const seededAdmin = seeded.filter((page) => page.app === 'admin');
 
 describe('the pages the database lets a menu link to', () => {
   it('finds them in the seed script', () => {
-    expect(seeded.map((page) => `${page.app}:${page.path}`)).toEqual(['member:/dashboard', 'member:/workspaces', 'admin:/admin', 'admin:/admin/menus', 'admin:/admin/permissions']);
+    expect(seeded.map((page) => `${page.app}:${page.path}`)).toEqual(['member:/dashboard', 'member:/workspaces', 'admin:/admin', 'admin:/admin/menus', 'admin:/admin/permissions', 'member:/team']);
   });
 
   it('are all pages this app has (the Site admin pages belong to the Site admin app)', () => {

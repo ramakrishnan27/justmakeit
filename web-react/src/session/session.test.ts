@@ -138,6 +138,43 @@ describe('session', () => {
     });
   });
 
+  describe('acceptInvitation', () => {
+    const details = { token: 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE', fullName: 'Ana Smith', password: 'ten chars!!' };
+
+    it('sends the secret and the chosen name and password in the body of a POST, then signs in', async () => {
+      const { fetchFn, session } = setup({ 'POST /v1/auth/invitations/accept': () => jsonResponse(200, { expiresAt: endsAt }) });
+
+      await session.acceptInvitation(details);
+
+      expect(session.getState().status).toBe('signedIn');
+      const [accept] = fetchFn.calls;
+      expect(accept!.path).toBe('/v1/auth/invitations/accept');
+      expect(accept!.init.method).toBe('POST');
+      expect(JSON.parse(accept!.init.body as string)).toEqual(details);
+      expect(fetchFn.calls.every((call) => !call.path.includes(details.token))).toBe(true);
+    });
+
+    it('stays signed out when the invitation is no longer valid', async () => {
+      const { session } = setup({ 'POST /v1/auth/invitations/accept': () => jsonResponse(404, { code: 'invitation_invalid' }) });
+
+      await expect(session.acceptInvitation(details)).rejects.toMatchObject({ status: 404, code: 'invitation_invalid' });
+
+      expect(session.getState().status).not.toBe('signedIn');
+    });
+
+    it('takes the cookie away again when the invitation worked but the page cannot go on', async () => {
+      const { fetchFn, session } = setup({
+        'POST /v1/auth/invitations/accept': () => jsonResponse(200, { expiresAt: endsAt }),
+        'GET /v1/menu': () => jsonResponse(500, {}),
+      });
+
+      await expect(session.acceptInvitation(details)).rejects.toBeInstanceOf(ApiError);
+
+      expect(session.getState().status).not.toBe('signedIn');
+      expect(fetchFn.calls.map((call) => call.path)).toContain('/v1/auth/logout');
+    });
+  });
+
   describe('restore', () => {
     it('asks the server who the cookie signs in when the page starts', async () => {
       const { fetchFn, session } = setup();
@@ -467,6 +504,12 @@ describe('the Site admin session', () => {
     await expect(session.signIn('root@example.com', 'wrong')).rejects.toMatchObject({ status: 401 });
 
     expect(session.getState().status).not.toBe('signedIn');
+  });
+
+  it('has no invitations either', async () => {
+    const { session } = adminSetup();
+
+    await expect(session.acceptInvitation({ token: 'abc', fullName: 'X', password: 'ten chars!!' })).rejects.toThrow(/no invitations/);
   });
 
   it('has no sign-up', async () => {

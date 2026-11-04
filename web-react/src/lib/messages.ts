@@ -171,3 +171,132 @@ export function messageForWorkspaceError(error: unknown): string {
   }
   return 'The workspace could not be added. Try again in a moment.';
 }
+
+/** What to show when the team could not be loaded. */
+export function messageForTeamLoadError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return 'Your role cannot manage the team.';
+    }
+    return error.status === 429 ? tooMany : 'The team could not be loaded.';
+  }
+  return offline;
+}
+
+/** Checks the invite form before anything is sent. @returns The first problem found, or null. */
+export function validateInvite(email: string, role: string): FieldProblem | null {
+  const problem = validateSignIn(email, 'x');
+  if (problem) {
+    return problem;
+  }
+  if (email.trim().length > 254) {
+    return { field: 'email', message: 'The email address must be at most 254 characters.' };
+  }
+  if (role.length === 0) {
+    return { field: 'role', message: 'Choose a role for the new employee.' };
+  }
+  return null;
+}
+
+/** What to tell an organization admin when an invitation could not be made. */
+export function messageForInviteError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'email_taken':
+        return 'That email address already has an account, so it cannot be invited.';
+      case 'invitation_exists':
+        return 'An invitation for that address is already waiting. Cancel it first to make another.';
+      case 'team_not_available':
+        return 'An individual creator works alone and cannot invite people.';
+      default:
+        break;
+    }
+    if (error.status === 403) {
+      return 'Your role cannot manage the team.';
+    }
+    if (error.status === 429) {
+      return tooMany;
+    }
+    const field = firstFieldError(error);
+    if (field) {
+      return field;
+    }
+  }
+  return error instanceof ApiError ? 'The invitation could not be made. Try again in a moment.' : offline;
+}
+
+/** What to tell an organization admin when changing a role, removing a person or cancelling an invitation failed. */
+export function messageForTeamActionError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'last_organization_admin':
+        return 'An organization needs at least one organization admin.';
+      case 'cannot_change_self':
+        return 'You cannot change or remove yourself.';
+      case 'member_not_found':
+        return 'That person is no longer in the organization. The list was refreshed.';
+      case 'invitation_not_found':
+        return 'That invitation is not waiting any more. The list was refreshed.';
+      case 'role_not_allowed':
+        return 'That role is not available in this kind of organization.';
+      default:
+        break;
+    }
+    if (error.status === 403) {
+      return 'Your role cannot manage the team.';
+    }
+    if (error.status === 429) {
+      return tooMany;
+    }
+    const field = firstFieldError(error);
+    if (field) {
+      return field;
+    }
+  }
+  return error instanceof ApiError ? 'That did not work. Try again in a moment.' : offline;
+}
+
+/** What to show on the invitation page when the link could not be read. */
+export function messageForInvitationPreviewError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return 'This invitation is no longer valid. It may have expired, been used or been cancelled. Ask your organization admin for a new link.';
+    }
+    return error.status === 429 ? tooMany : 'The invitation could not be checked. Try again in a moment.';
+  }
+  return offline;
+}
+
+/** Checks the accept form before anything is sent. @returns The first problem found, or null. */
+export function validateAcceptance(fullName: string, password: string): FieldProblem | null {
+  if (fullName.trim().length === 0) {
+    return { field: 'fullName', message: 'Enter your name.' };
+  }
+  if (fullName.trim().length > 200) {
+    return { field: 'fullName', message: 'Your name must be at most 200 characters.' };
+  }
+  if (password.length < minPasswordLength) {
+    return { field: 'password', message: `Choose a password of at least ${minPasswordLength} characters.` };
+  }
+  if (password.length > 128) {
+    return { field: 'password', message: 'The password must be at most 128 characters.' };
+  }
+  return null;
+}
+
+/** What to tell the person when accepting an invitation failed. */
+export function messageForAcceptError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return messageForInvitationPreviewError(error);
+    }
+    if (error.status === 409) {
+      return 'That email address already has an account. Sign in instead.';
+    }
+    if (error.status === 429) {
+      return 'Too many attempts. Wait a minute, then try again.';
+    }
+    return firstFieldError(error) ?? 'The invitation could not be accepted. Try again in a moment.';
+  }
+  return offline;
+}

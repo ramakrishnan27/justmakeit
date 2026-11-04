@@ -33,4 +33,11 @@ export const pages: readonly PageDefinition[] = [
     permission: PERMISSIONS.workspacesView,
     Component: lazy(() => import('@/features/workspaces/WorkspacesPage')),
   },
+  {
+    key: 'team',
+    path: '/team',
+    title: 'Team',
+    permission: PERMISSIONS.membersManage,
+    Component: lazy(() => import('@/features/team/TeamPage')),
+  },
 ];

@@ -114,13 +114,15 @@ migrator sets that role's password from this string, so it is configured in one 
 How long a sign-in lasts is `Jwt:AccessTokenDays` (default 30, allowed 1 to 90). The old `Jwt:AccessTokenMinutes` and
 `Jwt:RefreshTokenDays` no longer exist; leftover values for them in user-secrets or the environment are ignored.
 
+How long an invitation link lasts is `Auth:InvitationDays` (default 7, allowed 1 to 30).
+
 ## Database
 
 - Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
   `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql`, `004_external_identities.sql` and
   `005_menus_permissions.sql` are released: do not change them. `006_remove_refresh_tokens.sql` drops the two refresh token
-  tables and their lookups (released once committed). Phase 2 writes `007_email.sql`. Every script runs on every start, so a
+  tables and their lookups (released). `007_team_members.sql` adds the team tables and functions (released once committed). Phase 2 writes `008_email.sql`. Every script runs on every start, so a
   later one may never change what an earlier one re-creates (for example the return type of a function that
   `CREATE OR REPLACE` makes again): add a new function instead. (`001` and `002` still create the refresh token tables on
   every start and `006` drops them again in the same transaction; that is harmless, and nothing may use those tables.)
@@ -178,11 +180,11 @@ or was skipped, and any open question.
 |---|---|
 | 0 | Foundations: this file, compose, Helpers, Infrastructure, Api host + /health, test projects. **Done** |
 | 1 | Auth endpoints, workspaces, authorization policies, rate limiting on /v1/auth/*. **Done** |
-| 2 | `007_email.sql` (was 002; the site admin, business model, Google sign-in, menus-and-permissions and refresh-token-removal scripts took 002 to 006), senders, contacts, lists, suppressions, CSV import |
+| 2 | `008_email.sql` (was 002; the site admin, business model, Google sign-in, menus-and-permissions, refresh-token-removal and team scripts took 002 to 007), senders, contacts, lists, suppressions, CSV import |
 | 3 | Templates + renderer, campaigns + state machine |
 | 4 | Scheduler/dispatcher workers, providers, tracking endpoints, webhooks |
 | 5 | Reports |
-| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); the rest (organization switcher, invitations, PWA) is still to do. **The frontend is being rebuilt in React** (`web-react/`, see React frontend): the member app and the Site admin sign-in and dashboard are there, the Site admin's menu and permission editors are next, then `web/` can go |
+| 6 | Frontend foundation. **Started early:** site admin login and dashboard (API in `/v1/site/*`, pages in `web/`); **Also started early:** the member app (`/login`, `/register`, `/dashboard`) with Continue with Google; **and a third:** the app shell with a sidebar from the database, permissions in the token, and the Site admin's menu and permission editors (see Menus and permissions); invitations and the team page are built (see Team members and invitations); the rest (organization switcher, PWA) is still to do. **The frontend is being rebuilt in React** (`web-react/`, see React frontend): the member app and the Site admin sign-in and dashboard are there, the Site admin's menu and permission editors are next, then `web/` can go |
 | 7 | Frontend email screens (in `web-react/`) |
 | 8 | CI, README, seed data, security review |
 
@@ -337,8 +339,8 @@ or was skipped, and any open question.
   function stays, unused. The dashboard shows a business model badge and says "Organizations".
 - Access tokens issued before this change carry the old role names and get 403 until refreshed (15 minutes at most).
   Nothing was deployed, and the development database had no organizations.
-- Open: no endpoint adds or removes members yet, so "the last organizationadmin cannot be removed" is a rule for when they
-  are built. A creator will need a way to connect their own accounts later; `CanManage` is admin-only, so that needs its own policy.
+- The last organizationadmin cannot be removed or demoted (the team functions enforce it, see Team members and invitations).
+  Open: a creator will need a way to connect their own accounts later; `CanManage` is admin-only, so that needs its own policy.
 
 **Member app: sign-in, sign-up and a dashboard for each role (requested by the user; the second early slice of Phase 6)**
 - Addresses: `/login`, `/register`, `/dashboard` (the site admin app stays under `/admin`). `MapPlatformWebFallback` answers
@@ -377,8 +379,8 @@ or was skipped, and any open question.
   the role may do (mirrors the server's policies; the server still decides), the workspaces (client workspaces in an agency;
   an organization admin of a company or agency can add one, a creator has the one made at sign-up), what is still to come for
   that role (labelled "Coming soon": none of it exists), and the token's user id and role.
-- Not built: inviting people into an organization (so in practice only the founder of a company or agency exists; the other
-  roles can be tried only by inserting members in the database), an organization switcher for people in several
+- Not built then: inviting people into an organization (built since, see Team members and invitations), an organization
+  switcher for people in several
   organizations, linking Google to an existing account (needs email verification first), changing a password, and the real
   Google round trip, which needs your own Google credentials and was checked here only against a stand-in for Google.
 
@@ -515,7 +517,7 @@ Status: the member app and the Site admin sign-in and dashboard are built, teste
 - Google sign-in through the dev server: Google sends the person back to the address the request came from, so register
   `http://localhost:5173/v1/auth/google/callback` in Google Cloud Console (or set `Google:RedirectUri`). Still never run against
   real Google credentials.
-- Tests (`npm test`, 218 in 16 files): the API client and session ported from the old suite, wording and roles, the permission
+- Tests (`npm test`, 218 in 16 files when this was written, 320 in 21 after the Team slice): the API client and session ported from the old suite, wording and roles, the permission
   rules, `<Can>`, the route guards and drawer, the sign-in, sign-up, dashboard and workspaces screens, and **contracts with
   the server's own source** (permission keys against `PermissionKeys.cs`, menu icons against `MenuIcons.cs`, page table against
   the seeds in `005_menus_permissions.sql`). `rules.test.ts` ports the old rules: no storage, no markup from strings (including
@@ -526,7 +528,7 @@ Status: the member app and the Site admin sign-in and dashboard are built, teste
   workspace, in-app "not found", the drawer at 360 px (open, Escape), no horizontal scroll, sign-out, wrong password, and a
   permission revoked in the database reaching the open app (page turns into "no access", link leaves the sidebar). No script or
   CSP errors; the only console entries are the expected 401 and 403 answers.
-- Not built: the Site admin's menu and permission editors, the organization switcher, invitations, linking Google to an existing account. The legacy
+- Not built: the Site admin's menu and permission editors, the organization switcher, linking Google to an existing account. The legacy
   `web/` app and its tests are unchanged (291 tests still pass).
 
 **Site admin sign-in and dashboard in React (requested by the user: "admin login page is missing", after the Menu component was
@@ -597,7 +599,7 @@ page; token expire time is 30 day limit"). Current; it supersedes every refresh-
   `auth_find_site_refresh_token()` (changes existing tables, approved). `001` and `002` are released and still create them on every
   start; `006` drops them again in the same transaction, which is harmless and tested for a superuser and for an owner that
   row-level security binds (`RefreshTokenRemovalMigrationTests`). The migration count in `MigrationTests` is 11 tables. Phase 2's
-  script is now `007_email.sql`.
+  script was `007_email.sql`; the team script took 007, so it is `008_email.sql`.
 - **Code removed.** `IRefreshTokenRepository`/`RefreshTokenRepository` and the Site admin pair, their models, `RefreshAsync` and
   `LogoutAsync` in both services, the refresh branch of `SwitchAgencyAsync`, `TokenResponse`, `RefreshTokenCookie`. `AuthResult` is
   now `(AccessToken, ExpiresAt)`. In both clients: `refresh()`, `getAccessToken/setAccessToken`, `onTokenRefreshed`, `jwt.js`/`jwt.ts`
@@ -608,9 +610,8 @@ page; token expire time is 30 day limit"). Current; it supersedes every refresh-
   is still cut off at once on every `/v1/site` data route because those check `site_admins` in the database on each call.
   (2) **Roles and permissions in a token lag up to 30 days** where a policy reads them from the token (it was 15 minutes);
   `/me` and the services still read the database. Any permission change ends every session, so permissions cannot be stale
-  that way; a **role or membership change can**. No endpoint changes or removes members yet; **when one is built it needs a way
-  to end sessions** (for example a per-user "valid after" timestamp checked in the token pipeline), or a removed member keeps
-  access for up to 30 days. (3) **Cookie authentication puts CSRF in scope** (a header token did not). SameSite=Strict keeps cross-site
+  that way; a **role or membership change can**. Changing a role or removing a member now ends that person's sessions (see Team members and invitations: `session_revocations` and
+  `SessionRevocationMiddleware`); without that a removed member would have kept access for up to 30 days. (3) **Cookie authentication puts CSRF in scope** (a header token did not). SameSite=Strict keeps cross-site
   requests from carrying the cookie; a sibling subdomain counts as same-site, so no site that serves user-supplied content may
   share the parent domain. There are no state-changing GET endpoints. (4) A cookie is limited to about 4 KB; a token is well
   under 1 KB, but a very long permission list would need a rethink. (5) Everyone signs in once after this change: the old
@@ -622,3 +623,17 @@ page; token expire time is 30 day limit"). Current; it supersedes every refresh-
   `006` on a database that held the tables. Frontend: the API client (a 401 ends the session without any renewal, the sign-in's
   own 401 does not), the session store (restore, sign-out removes the cookie, a failed start removes it), the dashboards, and the
   source rules above.
+
+**Team members and invitations (requested by the user: "for company and marketing agency give option to add employees and login to site member"). Status: built, tested and checked in two real browsers; Google on the invite page is not built.**
+- Choices the user made: an **invite link** (no email is sent, `Platform.Email` is still an empty stub: the admin copies the link and the employee sets their own password); an email that **already has an account is refused** (409 `email_taken`; joining a second organization waits for the organization switcher); scope is invite, list, cancel an invitation, **change role, remove**; removing a person's **last membership deletes their account** (a Site admin's account is kept).
+- **Who.** New permission `members.manage`, granted by default only to organizationadmin of a company or an agency (a creator works alone: `team_not_available`). Whoever holds it can also make organization admins. Seeding it raised the permission version once, so everyone signed in again once.
+- `007_team_members.sql` (new tables, plus owner-only policies on three existing ones, approved with the plan): `member_invitations` (a tenant table: email in lower case, role, `token_hash` unique, `invited_by`, `expires_at`, `accepted_at`, `revoked_at`; the role/model CHECK of `agency_members`, never a creator; one pending invitation per address) and `session_revocations (agency_id, user_id, valid_after)` (no foreign key on `user_id`, so a row outlives a deleted account; `app_user` has no privileges on it). The migrating role gets `owner_team_*` policies on `users`, `agency_members` and `user_identities` and `owner_manage` on the two new tables, as in `002` and `005` (a test runs everything as a non-superuser owner too). The menu page `team` (`/team`, `members.manage`, icon `users`, sort 30) is seeded like the others.
+- Everything that crosses a tenant goes through narrow `SECURITY DEFINER` functions (`search_path = public, pg_temp`): `team_list_members()`, `team_change_role(user, role)`, `team_remove_member(user)`, `auth_email_registered(email)`, `invitation_find(token_hash)`, `invitation_accept(...)` (atomic: it re-checks the invitation, inserts the user, the optional identity and the membership, and marks the invitation accepted) and `session_revocations_snapshot()`; two internal helpers (`org_caller_holds`, `team_end_sessions`) are not callable by `app_user`. They raise 42501 when the caller lacks the permission and P0001 rule codes that the repository turns into `AppException`s. Change and remove take a per-organization advisory lock first and check the permission second, so two simultaneous removals cannot both pass the last-admin rule, and a caller removed a moment ago is refused.
+- **Endpoints** (`MembersController`, `v1/members`, policy `members.manage`, session rate limit, no-store): `GET /` (the people and the waiting invitations), `POST invitations` (201; the answer carries the secret of the link, the only time it is ever sent), `DELETE invitations/{id}`, `PUT {userId}/role`, `DELETE {userId}`. Anonymous, credentials rate limit, the secret in the **body**: `POST /v1/auth/invitations/preview` and `POST /v1/auth/invitations/accept` (name and password; it sets the cookie and answers `{expiresAt}` like sign-in; the address is the invited one, never taken from the request). Error codes: `email_taken`, `invitation_exists`, `invitation_not_found`, `invitation_invalid` (an unknown, used, cancelled or expired invitation all answer the same), `member_not_found`, `cannot_change_self` (nobody changes or removes themselves), `last_organization_admin`, `role_not_allowed`, `team_not_available`.
+- **The invitation secret.** `TokenGenerator.Create()` (43 characters of base64url); only its SHA-256 is stored. The link is `/accept-invite#<secret>`: after the `#`, so no server log or Referer holds it. The page reads it, removes it from the address bar and sends it only in the body of a POST. It lasts `Auth:InvitationDays` (default 7, allowed 1 to 30). A test captures the logs and asserts that no secret is in them.
+- **Ending sessions** (what the "Sessions without refresh tokens" note below asked for). A role change or a removal writes `session_revocations.valid_after`; `SessionRevocationService` holds the rows in memory (a 30 s `SnapshotCache`, invalidated after every team change made here) and `SessionRevocationMiddleware`, after `PermissionVersionMiddleware`, answers 401 `session_ended` to a member token whose `iat` is not after `valid_after` (whole seconds) or that has no `iat`. Site admin tokens and `[AllowAnonymous]` endpoints are skipped. Costs: a person who signs in within the same second as a change is refused once (it fails closed), and another instance learns of a change within 30 s.
+- **React.** The Team page (`/team`, needs `members.manage`, never mounted without it): a pill search box, filter chips ("role is Content Writer", a "+" to add one), a table with tick boxes (people and waiting invitations together; the role changed in place; Remove with an inline confirmation; Cancel invite; remove the ticked rows after one confirmation) and a **New Employee** button that opens the invite form in a modal dialog (`components/ui/Modal.tsx`: a portal, the page behind inert, Tab kept inside, Escape, × or a tap outside close it, focus returns to the button; while the link is on screen or a request is on its way Escape and the tap outside do nothing, because the link is shown once). Below 1024 px each row is a card. Layout from the user's reference screenshot (an orders table). `/accept-invite` is a public route outside the sign-in guards; `session.acceptInvitation` signs the person in as sign-up does. `rolesFor(model)` mirrors `BusinessModelRules.AllowedRoles` (a test reads the server source).
+- **Palette.** The sign-in page's cream and green (`#fbfaf6`, `#1f7a55`, `#1a1d21`, with a dark variant) is now the palette of the whole React app, as tokens on `:root`, including the Site admin app. `web/` is unchanged and still has it on login and register only: the "dashboard and the site admin app still use the blue palette" note above describes `web/`.
+- **Running it.** The API on 5080 serves the older `web/` app, which has no Team page (its sidebar shows a Team link that opens "not found") and no `/accept-invite`. Use the React app: `cd web-react && npm run dev` (port 5173, forwards `/v1` to the API), including for the invite link.
+- Tests: the `007` migration (77 tests, once as a superuser owner and once as a limited one: isolation, each function against a non-member, a member without the permission and another tenant, the last admin under concurrency, orphan deletion, atomic accept, the race on an email), 19 end-to-end API tests (`TeamApiTests`), the services, validation and the revocation comparison (Auth.Tests, 831), the middleware, and React (320 tests in 21 files, with contracts against `PermissionKeys.cs`, `007_team_members.sql` and `BusinessModelRules.cs`). Checked in two real browsers at 360, 1024 and 1280 px and in the dark scheme: invite, copy, accept, a role change and a removal ending the other person's session, the same address invited again.
+- Not built: Google on the invite page (an invited person can use only a password), an email to the invitee, changing a password, an organization switcher. Never run against real Google, nor on PostgreSQL 16 (CI does that).

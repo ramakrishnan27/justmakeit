@@ -57,7 +57,6 @@ const responsibilitiesByModel: Record<BusinessModel, Partial<Record<Organization
 /** The areas a role will work in once they are built. None of them exist yet; the dashboard says so. */
 const upcomingByRole: Record<OrganizationRole, ReadonlyArray<readonly [string, string]>> = {
   organizationadmin: [
-    ['Team and permissions', 'Add people and decide what each one may do.'],
     ['Connected accounts', 'Connect the accounts your organization publishes to.'],
   ],
   clientmanager: [
@@ -97,6 +96,26 @@ export interface UpcomingArea {
 export function upcomingAreas(role: string | null | undefined): UpcomingArea[] {
   const areas = typeof role === 'string' && Object.hasOwn(upcomingByRole, role) ? upcomingByRole[role as OrganizationRole] : [];
   return areas.map(([title, text]) => ({ title, text }));
+}
+
+/**
+ * The roles an organization of this kind may give its people, in the order the invite form offers them. It is the
+ * server's BusinessModelRules.AllowedRoles; a test reads that source and compares. A kind this client does not know, and an
+ * individual creator (who works alone), get none.
+ */
+const rolesByModel: Record<BusinessModel, readonly OrganizationRole[]> = {
+  company: ['organizationadmin', 'marketingmanager', 'contentwriter'],
+  agency: ['organizationadmin', 'clientmanager', 'marketingmanager', 'contentwriter'],
+  creator: ['contentwriter'],
+};
+
+export function rolesFor(model: string | null | undefined): readonly OrganizationRole[] {
+  return typeof model === 'string' && Object.hasOwn(rolesByModel, model) ? rolesByModel[model as BusinessModel] : [];
+}
+
+/** Whether an organization of this kind has a team to manage: an individual creator works alone. */
+export function hasTeam(model: string | null | undefined): boolean {
+  return model === 'company' || model === 'agency';
 }
 
 /** What to call a workspace in this kind of organization: an agency has one per client. */

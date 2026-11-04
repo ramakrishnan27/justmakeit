@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { GuestOnly, NotFoundRoute, RequireAuth, RequirePermission } from '@/access/RouteGuards';
 import { Loading } from '@/components/ui/Notice';
+import AcceptInvitePage from '@/features/auth/AcceptInvitePage';
 import LoginPage from '@/features/auth/LoginPage';
 import RegisterPage from '@/features/auth/RegisterPage';
 import { useApp } from '@/navigation/AppContext';
@@ -17,6 +18,9 @@ export function MemberRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to={homePath} replace />} />
+
+      {/* Open to everyone, signed in or not: an invitation is how a person gets an account, and the secret in the address is the only credential. */}
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
       <Route element={<GuestOnly />}>
         <Route path="/login" element={<LoginPage />} />

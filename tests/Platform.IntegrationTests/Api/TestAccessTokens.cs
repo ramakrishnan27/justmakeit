@@ -55,6 +55,30 @@ public static class TestAccessTokens
             [ClaimNames.Role] = role.ToDb()
         });
 
+    /// <summary>A member token that does not say when it was issued, so it cannot be compared with an ended session.</summary>
+    public static string CreateWithoutIssuedAt(string signingKey, Guid userId, Guid agencyId, OrganizationRole role, long permissionVersion)
+    {
+        // The token handler writes iat by itself whenever it builds a token from a descriptor, so this one signs a
+        // payload written by hand.
+        var now = DateTimeOffset.UtcNow;
+        var payload = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["iss"] = "platform",
+            ["aud"] = "platform-web",
+            ["nbf"] = now.ToUnixTimeSeconds(),
+            ["exp"] = now.AddMinutes(15).ToUnixTimeSeconds(),
+            [ClaimNames.UserId] = userId.ToString(),
+            [ClaimNames.AgencyId] = agencyId.ToString(),
+            [ClaimNames.Role] = role.ToDb(),
+            [ClaimNames.Permission] = DefaultGrantsPermissionService.DefaultKeys(role).ToArray(),
+            [ClaimNames.PermissionVersion] = permissionVersion
+        });
+
+        return new JsonWebTokenHandler().CreateToken(
+            payload,
+            new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)), SecurityAlgorithms.HmacSha256));
+    }
+
     /// <summary>A site admin token: the user and the siteadmin role, and no agency, like the real login issues.</summary>
     public static string CreateSiteAdmin(string signingKey, Guid userId) =>
         Sign(signingKey, new Dictionary<string, object>

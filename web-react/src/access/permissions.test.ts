@@ -8,7 +8,7 @@ const serverKeys = [...serverSource.matchAll(/public const string \w+ = "([a-z][
 
 describe('PERMISSIONS', () => {
   it('finds the keys the server defines', () => {
-    expect(serverKeys).toHaveLength(6);
+    expect(serverKeys).toHaveLength(7);
   });
 
   it('is exactly the catalog of the server', () => {

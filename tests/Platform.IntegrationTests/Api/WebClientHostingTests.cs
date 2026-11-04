@@ -43,6 +43,9 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     [InlineData("/dashboard/")]
     [InlineData("/workspaces")]
     [InlineData("/workspaces/")]
+    [InlineData("/team")]
+    [InlineData("/team/")]
+    [InlineData("/accept-invite")] // the invitation link; its secret is in the fragment, which the server never sees
     public async Task EveryClientSideAddress_AnswersWithTheAppShell_ToAVisitorWhoIsNotSignedIn(string path)
     {
         var response = await _host.GetAsync(path);
@@ -65,6 +68,8 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         Assert.Equal(root, await (await _host.GetAsync("/register")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/dashboard")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/workspaces")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/team")).Content.ReadAsStringAsync());
+        Assert.Equal(root, await (await _host.GetAsync("/accept-invite")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/admin/menus")).Content.ReadAsStringAsync());
         Assert.Equal(root, await (await _host.GetAsync("/admin/permissions")).Content.ReadAsStringAsync());
     }
@@ -77,7 +82,11 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         var authTypo = await _host.GetAsync("/v1/auth/googl/start");
         var deeper = await _host.GetAsync("/dashboard/settings");
         var deeperWorkspaces = await _host.GetAsync("/workspaces/anything");
+        var deeperTeam = await _host.GetAsync("/team/anything");
+        var deeperInvite = await _host.GetAsync("/accept-invite/anything");
 
+        Assert.NotEqual("text/html", deeperTeam.Content.Headers.ContentType?.MediaType);
+        Assert.NotEqual("text/html", deeperInvite.Content.Headers.ContentType?.MediaType);
         Assert.NotEqual("text/html", typo.Content.Headers.ContentType?.MediaType);
         Assert.Equal(HttpStatusCode.Unauthorized, typo.StatusCode);
         Assert.NotEqual("text/html", elsewhere.Content.Headers.ContentType?.MediaType);
@@ -161,7 +170,8 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         // The graph is the whole client: the entry point, the core modules, the app shell and every page.
         foreach (var expected in new[]
                  {
-                     "/js/main.js", "/js/core/api.js", "/js/core/session.js", "/js/core/router.js", "/js/core/jwt.js",
+                     // (/js/core/jwt.js was removed with the refresh tokens: the page holds no token any more.)
+                     "/js/main.js", "/js/core/api.js", "/js/core/session.js", "/js/core/router.js",
                      "/js/core/format.js", "/js/core/messages.js", "/js/core/dom.js",
                      "/js/pages/admin-login.js", "/js/pages/admin-dashboard.js",
                      "/js/pages/admin-menus.js", "/js/pages/admin-permissions.js",
@@ -184,7 +194,7 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         foreach (var path in new[]
                  {
                      "/", "/admin", "/admin/login", "/admin/menus", "/admin/permissions", "/login", "/register", "/dashboard", "/workspaces",
-                     "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
+                     "/team", "/accept-invite", "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
                      "/js/pages/admin-login.js", "/js/pages/member-login.js", "/js/pages/member-register.js"
                  })
         {

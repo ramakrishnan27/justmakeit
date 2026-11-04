@@ -51,6 +51,16 @@ public static class AuthModule
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
 
+        // The team: inviting, changing and removing people. Ending a session is held in memory like the permissions,
+        // so refusing a removed member's token reads no database per request.
+        services.AddOptions<InvitationSettings>().BindConfiguration(InvitationSettings.SectionName);
+        services.AddSingleton<IValidateOptions<InvitationSettings>, InvitationSettingsValidator>();
+        services.AddScoped<ITeamRepository, TeamRepository>();
+        services.AddScoped<IInvitationRepository, InvitationRepository>();
+        services.AddScoped<ITeamService, TeamService>();
+        services.AddSingleton<ISessionRevocationService, SessionRevocationService>();
+        services.AddScoped<ISessionRevocationRepository, SessionRevocationRepository>();
+
         services.AddOptions<SiteAdminSettings>().BindConfiguration(SiteAdminSettings.SectionName);
         services.AddSingleton<IValidateOptions<SiteAdminSettings>, SiteAdminSettingsValidator>();
         services.AddScoped<ISiteAdminRepository, SiteAdminRepository>();

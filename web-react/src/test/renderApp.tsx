@@ -15,6 +15,8 @@ export const sessionEndsAt = '2030-01-15T09:30:00Z';
 export const dashboardItem = { id: 'm1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/dashboard' };
 export const workspacesItem = { id: 'm2', pageKey: 'workspaces', label: 'Workspaces', icon: 'folder', path: '/workspaces' };
 
+export const teamItem = { id: 'm3', pageKey: 'team', label: 'Team', icon: 'users', path: '/team' };
+
 export interface MemberOptions {
   role?: OrganizationRole;
   businessModel?: BusinessModel;
@@ -40,6 +42,7 @@ export function memberServer(options: MemberOptions = {}, overrides: Record<stri
   return {
     'POST /v1/auth/login': () => jsonResponse(200, { expiresAt: sessionEndsAt }),
     'POST /v1/auth/register': () => jsonResponse(201, { expiresAt: sessionEndsAt }),
+    'POST /v1/auth/invitations/accept': () => jsonResponse(200, { expiresAt: sessionEndsAt }),
     'POST /v1/auth/logout': () => new Response(null, { status: 204 }),
     'GET /v1/auth/me': () =>
       jsonResponse(200, {
@@ -120,10 +123,10 @@ export function adminVisitorServer(overrides: Record<string, Handler> = {}): Rec
   return { ...untilSignedIn(adminServer(), ['POST /v1/site/login'], ['POST /v1/site/logout']), ...overrides };
 }
 
-/** A server for a visitor who is not signed in: there is no cookie, so everything answers 401 until signing in or up works. */
+/** A server for a visitor who is not signed in: there is no cookie, so everything answers 401 until signing in, signing up or accepting an invitation works. */
 export function visitorServer(overrides: Record<string, Handler> = {}): Record<string, Handler> {
   return {
-    ...untilSignedIn(memberServer(), ['POST /v1/auth/login', 'POST /v1/auth/register'], ['POST /v1/auth/logout', 'GET /v1/auth/providers']),
+    ...untilSignedIn(memberServer(), ['POST /v1/auth/login', 'POST /v1/auth/register', 'POST /v1/auth/invitations/accept'], ['POST /v1/auth/logout', 'GET /v1/auth/providers']),
     ...overrides,
   };
 }

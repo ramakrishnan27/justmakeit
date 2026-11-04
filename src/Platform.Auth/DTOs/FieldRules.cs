@@ -100,6 +100,24 @@ internal static class FieldRules
         }
     }
 
+    /// <summary>
+    /// The secret of an invitation link (a 32-byte token in unpadded base64url is 43 characters). Only the shape is
+    /// checked here; whether it opens an invitation is the database's answer and looks the same for every miss.
+    /// </summary>
+    public static void InvitationToken(ValidationErrors errors, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add("token", "The invitation link is incomplete.");
+        }
+        else if (value.Length > MaxInvitationTokenLength)
+        {
+            errors.Add("token", "The invitation link is not valid.");
+        }
+    }
+
+    public const int MaxInvitationTokenLength = 200;
+
     /// <summary>The words on a menu item. Trimmed before it is stored; no line breaks or other control characters.</summary>
     public static void MenuLabel(ValidationErrors errors, string field, string? value)
     {

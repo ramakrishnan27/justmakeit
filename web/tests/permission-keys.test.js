@@ -9,7 +9,7 @@ const serverKeys = [...serverSource.matchAll(/public const string \w+ = "([a-z][
 
 describe('permissionKeys', () => {
   it('finds the keys the server defines', () => {
-    assert.equal(serverKeys.length, 6);
+    assert.equal(serverKeys.length, 7);
   });
 
   it('is exactly the catalog of the server', () => {

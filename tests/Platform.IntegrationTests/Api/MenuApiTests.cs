@@ -34,10 +34,10 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         [.. menu.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("label").GetString()!)];
 
     [Theory]
-    [InlineData("company")]
-    [InlineData("agency")]
-    [InlineData("creator")]
-    public async Task TheFounderOfEveryKindOfOrganization_SeesTheDashboardAndTheWorkspacesPage(string businessModel)
+    [InlineData("company", "/dashboard,/workspaces,/team")]
+    [InlineData("agency", "/dashboard,/workspaces,/team")]
+    [InlineData("creator", "/dashboard,/workspaces")] // a creator works alone: no team permission, so no Team page
+    public async Task TheFounder_SeesTheDashboardAndTheWorkspacesPage_AndTheTeamPageWhenTheyHoldThePermission(string businessModel, string paths)
     {
         var founder = await Host.RegisterAsync(businessModel: businessModel);
 
@@ -45,10 +45,34 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
 
         AssertStatus(HttpStatusCode.OK, response);
         var menu = await ApiTestHost.ReadJsonAsync(response);
-        Assert.Equal(["Dashboard", "Workspaces"], LabelsIn(menu));
+        Assert.Equal(paths.Split(','), menu.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("path").GetString()));
         Assert.Equal(
-            ["/dashboard", "/workspaces"],
-            menu.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("path").GetString()));
+            paths.Contains("/team"),
+            menu.GetProperty("permissions").EnumerateArray().Any(p => p.GetString() == PermissionKeys.MembersManage));
+    }
+
+    [Fact]
+    public async Task TheTeamPage_IsInTheMenuOfAnOrganizationAdminOnly_NotOfTheOtherRolesOfThatOrganization()
+    {
+        // Every other role is a content writer or a marketing manager signed up through an invitation.
+        var admin = await Host.RegisterAsync(businessModel: "company");
+        var (token, _) = await InviteAsync(admin, "writer@example.com", "contentwriter");
+        var accepted = await Host.PostAsync("/v1/auth/invitations/accept", new { token, fullName = "Writer", password = "writer password 123" });
+        var writerCookie = ApiTestHost.MemberCookieValue(accepted)!;
+
+        var adminMenu = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/menu", admin.AccessToken));
+        var writerMenu = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/menu", writerCookie));
+
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], LabelsIn(adminMenu));
+        Assert.Equal(["Dashboard", "Workspaces"], LabelsIn(writerMenu));
+    }
+
+    private async Task<(string Token, Guid InvitationId)> InviteAsync(Session admin, string email, string role)
+    {
+        var response = await Host.PostAsync("/v1/members/invitations", new { email, role }, admin.AccessToken);
+        AssertStatus(HttpStatusCode.Created, response);
+        var body = await ApiTestHost.ReadJsonAsync(response);
+        return (body.GetProperty("token").GetString()!, body.GetProperty("invitation").GetProperty("id").GetGuid());
     }
 
     [Fact]
@@ -95,7 +119,7 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
             var response = await Host.GetAsync("/v1/menu", admin.AccessToken);
 
             AssertStatus(HttpStatusCode.OK, response);
-            Assert.Equal(["Dashboard", "Workspaces"], LabelsIn(await ApiTestHost.ReadJsonAsync(response)));
+            Assert.Equal(["Dashboard", "Workspaces", "Team"], LabelsIn(await ApiTestHost.ReadJsonAsync(response)));
         }
         finally
         {

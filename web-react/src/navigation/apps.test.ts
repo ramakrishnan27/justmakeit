@@ -9,7 +9,7 @@ describe('appForPath', () => {
   });
 
   it('gives the member app everything else, including addresses that only start with the letters', () => {
-    for (const path of ['/', '/login', '/register', '/dashboard', '/workspaces', '/administrator', '/adminx/login', '/x/admin']) {
+    for (const path of ['/', '/login', '/register', '/accept-invite', '/dashboard', '/workspaces', '/team', '/administrator', '/adminx/login', '/x/admin']) {
       expect(appForPath(path), path).toBe(memberApp);
     }
   });
@@ -22,7 +22,7 @@ describe('the two apps', () => {
   });
 
   it('list the pages behind sign-in, and each lands on one of them', () => {
-    expect(memberApp.pagePaths).toEqual(['/dashboard', '/workspaces']);
+    expect(memberApp.pagePaths).toEqual(['/dashboard', '/workspaces', '/team']);
     expect(adminApp.pagePaths).toEqual(['/admin']);
     expect(memberApp.pagePaths).toContain(memberApp.homePath);
     expect(adminApp.pagePaths).toContain(adminApp.homePath);

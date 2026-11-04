@@ -30,6 +30,7 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseMiddleware<TenantContextMiddleware>();
 app.UseMiddleware<PermissionVersionMiddleware>();
+app.UseMiddleware<SessionRevocationMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

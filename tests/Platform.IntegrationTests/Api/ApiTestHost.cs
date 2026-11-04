@@ -168,7 +168,15 @@ public sealed class ApiTestHost : IAsyncDisposable
         // The token is in the cookie, never in the body.
         var accessToken = MemberCookieValue(response)!;
 
-        var me = await ReadJsonAsync(await GetAsync("/v1/auth/me", tokenCookie: accessToken));
+        var meResponse = await GetAsync("/v1/auth/me", tokenCookie: accessToken);
+        if (!meResponse.IsSuccessStatusCode)
+        {
+            // Say what the server answered: a bare KeyNotFoundException from the parsing below hides the reason.
+            throw new InvalidOperationException(
+                $"/v1/auth/me answered {(int)meResponse.StatusCode} right after sign-in: {await meResponse.Content.ReadAsStringAsync()}");
+        }
+
+        var me = await ReadJsonAsync(meResponse);
         return new Session(
             email,
             password,

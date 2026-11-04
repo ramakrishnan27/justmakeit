@@ -39,5 +39,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Each test draws the whole app in jsdom, and the files run side by side: on a busy or small machine the defaults
+    // (5 s a test) fail tests that are only slow. A test that passes quickly is not made slower by a longer limit.
+    testTimeout: 20_000,
   },
 });

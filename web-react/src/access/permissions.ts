@@ -12,6 +12,7 @@ export const PERMISSIONS = Object.freeze({
   dataRead: 'data.read',
   dataWrite: 'data.write',
   organizationManage: 'organization.manage',
+  membersManage: 'members.manage',
 } as const);
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

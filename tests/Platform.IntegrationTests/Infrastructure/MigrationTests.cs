@@ -74,9 +74,10 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
 
         await using var owner = await _db.OpenOwnerAsync();
         // 001_init.sql has five tables, 002_site_admin.sql two more, 004_external_identities.sql one and
-        // 005_menus_permissions.sql five, and 006_remove_refresh_tokens.sql drops the two that held refresh tokens
-        // (001 and 002 create them again on every run and 006 drops them again); a second run adds none.
-        Assert.Equal(11, await DbTestSupport.ScalarAsync<long>(
+        // 005_menus_permissions.sql five, 006_remove_refresh_tokens.sql drops the two that held refresh tokens
+        // (001 and 002 create them again on every run and 006 drops them again) and 007_team_members.sql adds
+        // member_invitations and session_revocations; a second run adds none.
+        Assert.Equal(13, await DbTestSupport.ScalarAsync<long>(
             owner,
             "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
             "WHERE n.nspname = 'public' AND c.relkind = 'r'"));

@@ -2,7 +2,7 @@ namespace Platform.Helpers.Constants;
 
 /// <summary>
 /// The permission catalog. Each key is a row in the <c>permissions</c> table (seeded by
-/// <c>005_menus_permissions.sql</c>), is granted to a business model and role in <c>role_permissions</c>,
+/// <c>005_menus_permissions.sql</c> and later scripts), is granted to a business model and role in <c>role_permissions</c>,
 /// travels in the access token as a <see cref="ClaimNames.Permission"/> claim and is named by an endpoint
 /// through <c>PolicyNames.PermissionPrefix + PermissionKeys.X</c>. Keys are code-defined because endpoints
 /// refer to them; the Site admin decides which role holds which, never which keys exist.
@@ -27,10 +27,16 @@ public static class PermissionKeys
     /// <summary>Baseline behind the <c>CanManage</c> policy: manage the organization itself.</summary>
     public const string OrganizationManage = "organization.manage";
 
+    /// <summary>
+    /// Invite people into the organization, change their roles and remove them: the Team page and <c>/v1/members</c>
+    /// (seeded by <c>007_team_members.sql</c>). Whoever holds it can also make organization admins.
+    /// </summary>
+    public const string MembersManage = "members.manage";
+
     /// <summary>Every key in the catalog. A test keeps this list, the constants above and the seeded table equal.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        DashboardView, WorkspacesView, WorkspacesCreate, DataRead, DataWrite, OrganizationManage
+        DashboardView, WorkspacesView, WorkspacesCreate, DataRead, DataWrite, OrganizationManage, MembersManage
     ];
 
     /// <summary>

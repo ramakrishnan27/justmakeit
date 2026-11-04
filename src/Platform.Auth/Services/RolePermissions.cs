@@ -6,7 +6,7 @@ namespace Platform.Auth.Services;
 
 /// <summary>
 /// What each role may do in a fresh installation: the factory defaults. <c>005_menus_permissions.sql</c>
-/// seeds exactly these as the grants of each business model and role, and a test compares the two. At run
+/// (and <c>007_team_members.sql</c> for its key) seeds exactly these as the grants of each business model and role, and a test compares the two. At run
 /// time the Site admin's settings in the database decide (they reach the API as permissions in the access
 /// token), so this class is the reference the seeds and the tests are checked against, not the rule that
 /// is applied. <see cref="TryParse"/> is still how a role claim is read.
@@ -37,7 +37,7 @@ public static class RolePermissions
     {
         PermissionKeys.DashboardView or PermissionKeys.WorkspacesView or PermissionKeys.DataRead => role.CanRead(),
         PermissionKeys.DataWrite => role.CanWrite(),
-        PermissionKeys.WorkspacesCreate or PermissionKeys.OrganizationManage => role.CanManage(),
+        PermissionKeys.WorkspacesCreate or PermissionKeys.OrganizationManage or PermissionKeys.MembersManage => role.CanManage(),
         _ => throw new ArgumentOutOfRangeException(nameof(permissionKey), permissionKey, "Unknown permission.")
     };
 

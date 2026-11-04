@@ -25,8 +25,8 @@ public sealed partial class PermissionKeysTests
     }
 
     [Fact]
-    public void ThereAreSixKeys_SoAddingOneMeansSeedingItAndSayingWhoGetsIt() =>
-        Assert.Equal(6, PermissionKeys.All.Count);
+    public void ThereAreSevenKeys_SoAddingOneMeansSeedingItAndSayingWhoGetsIt() =>
+        Assert.Equal(7, PermissionKeys.All.Count);
 
     [Fact]
     public void EveryKey_HasTheShapeTheDatabaseAccepts()

@@ -71,6 +71,35 @@ public sealed class AuthController(IAuthService auth) : ControllerBase
         return Issue(await auth.SwitchAgencyAsync(request, cancellationToken), StatusCodes.Status200OK);
     }
 
+    /// <summary>
+    /// What the invitation page shows for the secret in a link: the organization, the role and the invited address.
+    /// The secret is sent in the body, never in an address. A link that never existed, was used, was revoked or ran out
+    /// answers the same 404 (<c>invitation_invalid</c>).
+    /// </summary>
+    [HttpPost("invitations/preview")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
+    [ProducesResponseType<InvitationPreviewResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<InvitationPreviewResponse>> PreviewInvitation(InvitationTokenRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        return Ok(await auth.PreviewInvitationAsync(request, cancellationToken));
+    }
+
+    /// <summary>
+    /// Accepts an invitation: the person gets an account with the invited address, the name and password they chose, and
+    /// the invited role, and is signed in (the cookie is set; the body holds only when it ends).
+    /// </summary>
+    [HttpPost("invitations/accept")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.Credentials)]
+    [ProducesResponseType<SessionResponse>(StatusCodes.Status201Created)]
+    public async Task<IActionResult> AcceptInvitation(AcceptInvitationRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+        return Issue(await auth.AcceptInvitationAsync(request, cancellationToken), StatusCodes.Status201Created);
+    }
+
     /// <summary>The signed-in user, the current agency and role, every membership, and when the sign-in ends.</summary>
     [HttpGet("me")]
     [Authorize]

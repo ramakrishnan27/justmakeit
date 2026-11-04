@@ -20,6 +20,7 @@ public sealed class AuthServiceTests
     private readonly IAccountRepository _accounts = Substitute.For<IAccountRepository>();
     private readonly IMembershipRepository _memberships = Substitute.For<IMembershipRepository>();
     private readonly IAgencyRepository _agencies = Substitute.For<IAgencyRepository>();
+    private readonly IInvitationRepository _invitations = Substitute.For<IInvitationRepository>();
     private readonly IAccessTokenIssuer _accessTokens = Substitute.For<IAccessTokenIssuer>();
     private readonly IPermissionService _permissions = Substitute.For<IPermissionService>();
     private readonly Pbkdf2PasswordHasher _hasher = new(iterations: 1_000);
@@ -38,7 +39,7 @@ public sealed class AuthServiceTests
             .Returns(call => new PermissionGrants(7, [$"granted-to-{call.ArgAt<OrganizationRole>(1).ToDb()}"]));
         _accounts.CreateAccountAsync(Arg.Any<NewAccount>(), Arg.Any<CancellationToken>()).Returns(true);
 
-        _service = new AuthService(_accounts, _memberships, _agencies, _hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
+        _service = new AuthService(_accounts, _memberships, _agencies, _invitations, _hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
     }
 
     private static RegisterRequest ValidRegistration(string businessModel = "agency") =>
@@ -270,7 +271,7 @@ public sealed class AuthServiceTests
     {
         var hasher = Substitute.For<IPasswordHasher>();
         hasher.DummyHash.Returns("pbkdf2$1$c2FsdA==$AAAAAAAAAAAAAAAAAAAAAA==");
-        var service = new AuthService(_accounts, _memberships, _agencies, hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
+        var service = new AuthService(_accounts, _memberships, _agencies, _invitations, hasher, _accessTokens, _permissions, _tenant, _time, NullLogger<AuthService>.Instance);
         GivenUser(null);
 
         await Assert.ThrowsAsync<UnauthorizedException>(() =>

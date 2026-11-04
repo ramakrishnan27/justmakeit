@@ -67,12 +67,16 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         var config = await ConfigAsync("member");
 
         Assert.Equal("member", config.GetProperty("menuKey").GetString());
-        Assert.Equal(["dashboard", "workspaces"], PagesIn(config));
+        Assert.Equal(["dashboard", "workspaces", "team"], PagesIn(config));
         var dashboard = config.GetProperty("items")[0];
         Assert.True(dashboard.GetProperty("isLocked").GetBoolean());
         Assert.Equal(PermissionKeys.DashboardView, dashboard.GetProperty("requiredPermission").GetString());
         Assert.Equal("/dashboard", dashboard.GetProperty("path").GetString());
         Assert.False(config.GetProperty("items")[1].GetProperty("isLocked").GetBoolean());
+        var team = config.GetProperty("items")[2];
+        Assert.False(team.GetProperty("isLocked").GetBoolean());
+        Assert.Equal(PermissionKeys.MembersManage, team.GetProperty("requiredPermission").GetString());
+        Assert.Equal("/team", team.GetProperty("path").GetString());
         Assert.Empty(config.GetProperty("availablePages").EnumerateArray());
         Assert.Equal(MenuIcons.All, config.GetProperty("icons").EnumerateArray().Select(i => i.GetString()));
     }
@@ -97,16 +101,16 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
     {
         var member = await Host.RegisterAsync(businessModel: "company");
         var workspaces = IdOf(await ConfigAsync("member"), "workspaces");
-        Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], await MemberLabelsAsync(member.AccessToken));
 
         AssertStatus(HttpStatusCode.OK, await UpdateAsync("member", workspaces, "Workspaces", "folder", visible: false));
-        Assert.Equal(["Dashboard"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Team"], await MemberLabelsAsync(member.AccessToken));
 
         // The configuration still lists it, so the Site admin can show it again.
-        Assert.Equal(["dashboard", "workspaces"], PagesIn(await ConfigAsync("member")));
+        Assert.Equal(["dashboard", "workspaces", "team"], PagesIn(await ConfigAsync("member")));
 
         AssertStatus(HttpStatusCode.OK, await UpdateAsync("member", workspaces, "Workspaces", "folder", visible: true));
-        Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], await MemberLabelsAsync(member.AccessToken));
     }
 
     [Fact]
@@ -122,7 +126,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         Assert.Equal("Client spaces", updated.GetProperty("label").GetString());
         Assert.Equal("users", updated.GetProperty("icon").GetString());
         var menu = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/menu", member.AccessToken));
-        Assert.Equal(["Dashboard", "Client spaces"], LabelsIn(menu));
+        Assert.Equal(["Dashboard", "Client spaces", "Team"], LabelsIn(menu));
         Assert.Equal("users", menu.GetProperty("items")[1].GetProperty("icon").GetString());
     }
 
@@ -134,7 +138,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
 
         AssertStatus(HttpStatusCode.NoContent, await Host.DeleteAsync($"/v1/site/menus/member/items/{workspaces}", await SiteAdminTokenAsync()));
 
-        Assert.Equal(["Dashboard"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Team"], await MemberLabelsAsync(member.AccessToken));
         var afterDelete = await ConfigAsync("member");
         var available = Assert.Single(afterDelete.GetProperty("availablePages").EnumerateArray());
         Assert.Equal("workspaces", available.GetProperty("key").GetString());
@@ -149,7 +153,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         Assert.Equal("Spaces", item.GetProperty("label").GetString());
         Assert.True(item.GetProperty("isVisible").GetBoolean());
         Assert.False(item.GetProperty("isLocked").GetBoolean());
-        Assert.Equal(["Dashboard", "Spaces"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Team", "Spaces"], await MemberLabelsAsync(member.AccessToken)); // last, after Team
         Assert.Empty((await ConfigAsync("member")).GetProperty("availablePages").EnumerateArray());
     }
 
@@ -165,7 +169,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
 
         AssertStatus(HttpStatusCode.Created, added);
         Assert.False((await ApiTestHost.ReadJsonAsync(added)).GetProperty("isVisible").GetBoolean());
-        Assert.Equal(["Dashboard"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Dashboard", "Team"], await MemberLabelsAsync(member.AccessToken));
     }
 
     [Fact]
@@ -173,15 +177,15 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
     {
         var member = await Host.RegisterAsync(businessModel: "company");
         var config = await ConfigAsync("member");
-        var ids = new[] { IdOf(config, "workspaces"), IdOf(config, "dashboard") };
+        var ids = new[] { IdOf(config, "team"), IdOf(config, "workspaces"), IdOf(config, "dashboard") };
 
         var response = await Host.PutAsync("/v1/site/menus/member/order", new { itemIds = ids }, await SiteAdminTokenAsync());
 
         AssertStatus(HttpStatusCode.OK, response);
         var reordered = await ApiTestHost.ReadJsonAsync(response);
-        Assert.Equal(["workspaces", "dashboard"], PagesIn(reordered));
-        Assert.Equal([10, 20], reordered.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("sortOrder").GetInt32()));
-        Assert.Equal(["Workspaces", "Dashboard"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["team", "workspaces", "dashboard"], PagesIn(reordered));
+        Assert.Equal([10, 20, 30], reordered.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("sortOrder").GetInt32()));
+        Assert.Equal(["Team", "Workspaces", "Dashboard"], await MemberLabelsAsync(member.AccessToken));
     }
 
     [Fact]
@@ -192,9 +196,10 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
 
         Guid[][] notTheMenu =
         [
-            [IdOf(config, "workspaces")],                                           // one missing
-            [IdOf(config, "workspaces"), IdOf(config, "dashboard"), Guid.NewGuid()], // one extra
-            [IdOf(config, "workspaces"), Guid.NewGuid()]                            // one unknown
+            [IdOf(config, "workspaces")],                                                                  // two missing
+            [IdOf(config, "workspaces"), IdOf(config, "dashboard")],                                       // one missing
+            [IdOf(config, "workspaces"), IdOf(config, "dashboard"), IdOf(config, "team"), Guid.NewGuid()], // one extra
+            [IdOf(config, "workspaces"), IdOf(config, "dashboard"), Guid.NewGuid()]                        // one unknown in place of one
         ];
 
         foreach (var ids in notTheMenu)
@@ -205,7 +210,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
             Assert.Equal("menu_changed", await CodeOfAsync(response));
         }
 
-        Assert.Equal(["dashboard", "workspaces"], PagesIn(await ConfigAsync("member")));
+        Assert.Equal(["dashboard", "workspaces", "team"], PagesIn(await ConfigAsync("member")));
     }
 
     [Fact]
@@ -242,7 +247,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         AssertStatus(HttpStatusCode.Conflict, delete);
         Assert.Equal("menu_item_locked", await CodeOfAsync(delete));
         AssertStatus(HttpStatusCode.OK, rename);
-        Assert.Equal(["Home", "Workspaces"], await MemberLabelsAsync(member.AccessToken));
+        Assert.Equal(["Home", "Workspaces", "Team"], await MemberLabelsAsync(member.AccessToken));
     }
 
     [Theory]
@@ -389,7 +394,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         var companyAdmin = await Host.RegisterAsync(businessModel: "company");
         var agencyAdmin = await Host.RegisterAsync(businessModel: "agency");
         var token = await SiteAdminTokenAsync();
-        Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(companyAdmin.AccessToken));
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], await MemberLabelsAsync(companyAdmin.AccessToken));
         AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", companyAdmin.AccessToken));
 
         AssertStatus(HttpStatusCode.OK, await Host.PutAsync(
@@ -404,12 +409,12 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         var agencyFresh = await SignInAgainAsync(agencyAdmin);
 
         // The company admin lost it: not in the menu, not in the token, and the endpoint refuses.
-        Assert.Equal(["Dashboard"], await MemberLabelsAsync(companyFresh));
+        Assert.Equal(["Dashboard", "Team"], await MemberLabelsAsync(companyFresh));
         Assert.DoesNotContain(PermissionKeys.WorkspacesView, new JsonWebToken(companyFresh).GetPayloadValue<string[]>(ClaimNames.Permission));
         AssertStatus(HttpStatusCode.Forbidden, await Host.GetAsync("/v1/workspaces", companyFresh));
 
         // The agency admin did not.
-        Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(agencyFresh));
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], await MemberLabelsAsync(agencyFresh));
         AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", agencyFresh));
     }
 
@@ -424,13 +429,13 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
 
         await Host.PutAsync(url, revoke, token);
         var without = await SignInAgainAsync(admin);
-        Assert.Equal(["Dashboard"], await MemberLabelsAsync(without));
+        Assert.Equal(["Dashboard", "Team"], await MemberLabelsAsync(without));
 
         await Host.PutAsync(url, grant, token);
         AssertStatus(HttpStatusCode.Unauthorized, await Host.GetAsync("/v1/menu", without));
         var with = await SignInAgainAsync(admin);
 
-        Assert.Equal(["Dashboard", "Workspaces"], await MemberLabelsAsync(with));
+        Assert.Equal(["Dashboard", "Workspaces", "Team"], await MemberLabelsAsync(with));
         AssertStatus(HttpStatusCode.OK, await Host.GetAsync("/v1/workspaces", with));
     }
 
@@ -490,7 +495,7 @@ public sealed class SiteConfigurationApiTests(PostgresFixture postgres) : AuthAp
         }
 
         // And nothing was changed on the way.
-        Assert.Equal(2, await OwnerQueryAsync<long>("SELECT count(*) FROM menu_items WHERE menu_key = 'member'"));
+        Assert.Equal(3, await OwnerQueryAsync<long>("SELECT count(*) FROM menu_items WHERE menu_key = 'member'"));
         Assert.True(await OwnerQueryAsync<bool>(
             "SELECT is_granted FROM role_permissions WHERE business_model = 'company' AND role = 'organizationadmin' AND permission_key = 'data.read'"));
     }

@@ -12,6 +12,7 @@ export const permissionKeys = Object.freeze({
   dataRead: 'data.read',
   dataWrite: 'data.write',
   organizationManage: 'organization.manage',
+  membersManage: 'members.manage',
 });
 
 /**

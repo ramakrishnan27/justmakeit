@@ -13,6 +13,7 @@ public sealed class AuthService(
     IAccountRepository accounts,
     IMembershipRepository memberships,
     IAgencyRepository agencies,
+    IInvitationRepository invitations,
     IPasswordHasher passwordHasher,
     IAccessTokenIssuer accessTokens,
     IPermissionService permissions,
@@ -168,7 +169,38 @@ public sealed class AuthService(
             all.Select(m => new MembershipDto(m.AgencyId, m.AgencyName, m.BusinessModel, m.Role)).ToList());
     }
 
-    // The one place a member's access token is made: register, login, switch-agency and Google all
+    public async Task<InvitationPreviewResponse> PreviewInvitationAsync(InvitationTokenRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+
+        var found = await invitations.FindAsync(HashHelper.Sha256Hex(request.Token!.Trim()), cancellationToken)
+                    ?? throw InvitationErrors.Invalid();
+        return new InvitationPreviewResponse(found.OrganizationName, found.BusinessModel, found.Role, found.Email, found.ExpiresAt);
+    }
+
+    public async Task<AuthResult> AcceptInvitationAsync(AcceptInvitationRequest request, CancellationToken cancellationToken)
+    {
+        request.Validate().ThrowIfAny();
+
+        var tokenHash = HashHelper.Sha256Hex(request.Token!.Trim());
+        var found = await invitations.FindAsync(tokenHash, cancellationToken) ?? throw InvitationErrors.Invalid();
+
+        // Read before anything is written, so a failure here leaves no half-made account behind. An invitation never
+        // changes its organization or role, so what was found is what will be accepted.
+        var grants = await permissions.GetGrantsAsync(found.BusinessModel, found.Role, cancellationToken);
+
+        var userId = Guid.NewGuid();
+        var accepted = await invitations.AcceptAsync(
+            tokenHash, userId, request.FullName!.Trim(), passwordHasher.Hash(request.Password!), cancellationToken);
+
+        // Ids only: neither the link nor the address is logged.
+        logger.LogInformation(
+            "User {UserId} joined organization {AgencyId} as {Role} through invitation {InvitationId}",
+            userId, accepted.AgencyId, accepted.Role, found.Id);
+        return BuildResult(userId, accepted.AgencyId, accepted.Role, grants);
+    }
+
+    // The one place a member's access token is made: register, login, switch-agency, an accepted invitation and Google all
     // end here, each with the permissions its caller read for the member's role. Nothing is stored:
     // the token is the whole session.
     private AuthResult BuildResult(Guid userId, Guid agencyId, OrganizationRole role, PermissionGrants grants)

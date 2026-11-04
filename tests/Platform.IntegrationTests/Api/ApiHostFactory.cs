@@ -54,6 +54,10 @@ public sealed class ApiHostFactory(
     public string CreateAccessTokenWithVersion(Guid userId, Guid agencyId, OrganizationRole role, long permissionVersion) =>
         TestAccessTokens.Create(settings["Jwt:SigningKey"]!, userId, agencyId, role, null, permissionVersion);
 
+    /// <summary>A current member token that does not say when it was issued.</summary>
+    public string CreateAccessTokenWithoutIssuedAt(Guid userId, Guid agencyId, OrganizationRole role) =>
+        TestAccessTokens.CreateWithoutIssuedAt(settings["Jwt:SigningKey"]!, userId, agencyId, role, CurrentPermissionVersion());
+
     /// <summary>A member token with no permissions and no version, as issued before permissions travelled in the token.</summary>
     public string CreateAccessTokenWithoutPermissions(Guid userId, Guid agencyId, OrganizationRole role) =>
         TestAccessTokens.CreateWithoutPermissions(settings["Jwt:SigningKey"]!, userId, agencyId, role);
@@ -86,6 +90,8 @@ public sealed class ApiHostFactory(
                 services.AddSingleton<IPermissionService, DefaultGrantsPermissionService>();
                 services.RemoveAll<IMenuCache>();
                 services.AddSingleton<IMenuCache, DefaultMenuCache>();
+                services.RemoveAll<ISessionRevocationService>();
+                services.AddSingleton<ISessionRevocationService, DefaultSessionRevocationService>();
             }
 
             configureServices?.Invoke(services);

@@ -100,3 +100,52 @@ export interface PagedResult<T> {
   totalCount: number;
   totalPages: number;
 }
+
+// --- The team: the people in an organization and the invitations still waiting (MembersController on the server) ---
+
+/** A person in the organization. */
+export interface TeamMember {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: OrganizationRole;
+  joinedAt: string;
+  /** True for the person looking at the page: nobody can change or remove themselves. */
+  isYou: boolean;
+}
+
+/** An invitation nobody has accepted yet. The secret of its link is not here: the server keeps only a hash of it. */
+export interface Invitation {
+  id: string;
+  email: string;
+  role: OrganizationRole;
+  createdAt: string;
+  expiresAt: string;
+  isExpired: boolean;
+}
+
+export interface Team {
+  members: TeamMember[];
+  invitations: Invitation[];
+}
+
+/** A new invitation. `token` is the secret for the link, and this answer is the only time the server sends it. */
+export interface CreatedInvitation {
+  invitation: Invitation;
+  token: string;
+}
+
+/** What the invitation page shows before the person chooses a name and password. */
+export interface InvitationPreview {
+  organizationName: string;
+  businessModel: BusinessModel;
+  role: OrganizationRole;
+  email: string;
+  expiresAt: string;
+}
+
+export interface AcceptInvitationDetails {
+  token: string;
+  fullName: string;
+  password: string;
+}

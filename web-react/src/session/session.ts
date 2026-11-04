@@ -16,7 +16,7 @@
 // useSession() in SessionContext.tsx.
 
 import type { ApiClient } from '@/api/client';
-import type { MeResponse, Membership, Organization, OrganizationRole, RegisterDetails, SiteMeResponse, User } from '@/api/types';
+import type { AcceptInvitationDetails, MeResponse, Membership, Organization, OrganizationRole, RegisterDetails, SiteMeResponse, User } from '@/api/types';
 import { adminFallbackItems, parseMenu, type Menu, type MenuItem } from '@/navigation/menu';
 
 /** A role inside one organization, with the organization (and what kind it is) and every membership of the person. */
@@ -58,6 +58,8 @@ export interface Session {
   signIn(email: string, password: string): Promise<void>;
   /** Creates an account and signs in. Only the member app has one. Throws the API's ApiError (409 when the email is taken). */
   register(details: RegisterDetails): Promise<void>;
+  /** Accepts an invitation (the person chooses a name and password) and signs them in. Only the member app has invitations. Throws the API's ApiError. */
+  acceptInvitation(details: AcceptInvitationDetails): Promise<void>;
   /** Called once when the page starts: asks the server who the cookie, if there is one, signs in. */
   restore(): Promise<boolean>;
   /** Reads the sidebar and the permissions again. Callers that overlap share one read. */
@@ -73,6 +75,8 @@ export interface SessionEndpoints {
   menu: string;
   /** Null when the app has no sign-up. */
   register: string | null;
+  /** Null when the app has no invitations. */
+  acceptInvitation: string | null;
   /**
    * The sidebar to use when the server cannot send one. Null: do not guess. A member without permissions cannot tell
    * which pages are theirs, so a menu that cannot be read stops the sign-in.
@@ -87,6 +91,7 @@ export const memberEndpoints: SessionEndpoints = {
   me: '/v1/auth/me',
   menu: '/v1/menu',
   register: '/v1/auth/register',
+  acceptInvitation: '/v1/auth/invitations/accept',
   fallbackMenu: null,
   toProfile: (me) => {
     const { user, role, agency, memberships } = me as MeResponse;
@@ -100,6 +105,7 @@ export const siteAdminEndpoints: SessionEndpoints = {
   me: '/v1/site/me',
   menu: '/v1/site/menu',
   register: null,
+  acceptInvitation: null,
   fallbackMenu: adminFallbackItems,
   toProfile: (me) => ({ kind: 'admin', user: (me as SiteMeResponse).user, role: 'siteadmin' }),
 };
@@ -146,7 +152,7 @@ export function createSession(api: ApiClient, endpoints: SessionEndpoints = memb
     setState({ status: 'signedIn', ...endpoints.toProfile(me), menu: menu.items, permissions: menu.permissions, expiresAt });
   }
 
-  // Sign-in and sign-up both end the same way: the server sets the cookie, then the user, role and menu come from the API.
+  // Sign-in, sign-up and accepting an invitation all end the same way: the server sets the cookie, then the user, role and menu come from the API.
   async function start(path: string, body: unknown) {
     await api.request(path, { method: 'POST', body, auth: false });
     try {
@@ -212,6 +218,13 @@ export function createSession(api: ApiClient, endpoints: SessionEndpoints = memb
         throw new Error('This app has no sign-up.');
       }
       await start(endpoints.register, details);
+    },
+
+    async acceptInvitation(details) {
+      if (!endpoints.acceptInvitation) {
+        throw new Error('This app has no invitations.');
+      }
+      await start(endpoints.acceptInvitation, details);
     },
 
     // Callers that overlap share one attempt (React may start the page twice in development).

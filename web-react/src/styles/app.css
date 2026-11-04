@@ -1,29 +1,31 @@
-/* Site admin and member apps. Written for a 360 px phone first; wider screens add to it. No framework, no build step. */
+/* Site admin and member apps. Written for a 360 px phone first; wider screens add to it. No framework, no build step.
+   The palette is cream and green (page #fbfaf6, green #1f7a55, text #1a1d21) in both schemes, taken from the sign-in page. */
 
 :root {
   color-scheme: light dark;
 
-  --bg: #f4f6fa;
+  --bg: #fbfaf6;
   --surface: #ffffff;
-  --surface-2: #eef1f7;
-  --text: #16202e;
-  --muted: #5a6779;
-  --border: #d9dfeb;
-  --primary: #2447d6;
-  --primary-hover: #1b38ad;
+  --surface-2: #f2f0e8;
+  --text: #1a1d21;
+  --muted: #5d6570;
+  --border: #e3e0d6;
+  --border-strong: #c4c0b2;
+  --primary: #1f7a55;
+  --primary-hover: #17634a;
   --on-primary: #ffffff;
-  --accent-bg: #e4eaff;
-  --accent-text: #1b38ad;
+  --accent-bg: #e6f2ec;
+  --accent-text: #17634a;
   --trial-bg: #fff2d6;
   --trial-text: #7a4b00;
   --paid-bg: #dcf5e4;
   --paid-text: #14612f;
   --danger-bg: #fde8e8;
   --danger-text: #9b1c1c;
-  --focus: #2447d6;
+  --focus: #1f7a55;
 
   --radius: 12px;
-  --radius-sm: 8px;
+  --radius-sm: 12px;
   --gap: 16px;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -32,24 +34,25 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e141d;
-    --surface: #161e2b;
-    --surface-2: #1e2838;
-    --text: #e8edf5;
-    --muted: #9aa8bc;
-    --border: #2a364a;
-    --primary: #7b97ff;
-    --primary-hover: #9bb0ff;
-    --on-primary: #0e141d;
-    --accent-bg: #223166;
-    --accent-text: #c4d0ff;
+    --bg: #111613;
+    --surface: #19201c;
+    --surface-2: #222b26;
+    --text: #eef2ee;
+    --muted: #9fb0a6;
+    --border: #2a352f;
+    --border-strong: #4a5a50;
+    --primary: #46b988;
+    --primary-hover: #63cc9d;
+    --on-primary: #08140d;
+    --accent-bg: #17382a;
+    --accent-text: #bfeed7;
     --trial-bg: #4a3710;
     --trial-text: #ffd98a;
     --paid-bg: #123d24;
     --paid-text: #9be3b3;
     --danger-bg: #4a1b1b;
     --danger-text: #ffb4b4;
-    --focus: #9bb0ff;
+    --focus: #63cc9d;
     --shadow: none;
   }
 }
@@ -354,44 +357,8 @@ fieldset.field label.choice {
   .workspace-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* ---------- Member sign-in and sign-up: cream and green ----------
-   The palette is set on the whole document while one of these two pages is showing (so the body behind them matches),
-   and goes away with them: the dashboard and the site admin app keep the blue one. */
-
-:root:has(.auth-brand) {
-  --bg: #fbfaf6;
-  --surface: #ffffff;
-  --surface-2: #f2f0e8;
-  --text: #1a1d21;
-  --muted: #5d6570;
-  --border: #e3e0d6;
-  --border-strong: #c4c0b2;
-  --primary: #1f7a55;
-  --primary-hover: #17634a;
-  --on-primary: #ffffff;
-  --accent-bg: #e6f2ec;
-  --accent-text: #17634a;
-  --focus: #1f7a55;
-  --radius-sm: 12px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:has(.auth-brand) {
-    --bg: #111613;
-    --surface: #19201c;
-    --surface-2: #222b26;
-    --text: #eef2ee;
-    --muted: #9fb0a6;
-    --border: #2a352f;
-    --border-strong: #4a5a50;
-    --primary: #46b988;
-    --primary-hover: #63cc9d;
-    --on-primary: #08140d;
-    --accent-bg: #17382a;
-    --accent-text: #bfeed7;
-    --focus: #63cc9d;
-  }
-}
+/* ---------- Member sign-in and sign-up ----------
+   The colours are the app's own (the tokens at the top of this file); these rules lay out the two pages. */
 
 /* The logo sits top left; the form below it is centred on the page with no card around it. */
 .auth-brand.auth-page { display: flex; flex-direction: column; align-items: stretch; padding: 0; }
@@ -649,4 +616,278 @@ label.grant { display: flex; align-items: center; gap: 10px; min-height: 44px; f
 @media (min-width: 720px) {
   .grant-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .grant-group { border-top: 0; padding-top: 0; }
+}
+
+/* ---------- The team page: search, "New Employee", filter chips and the people table ----------
+   Laid out as in the design this page follows, in the app's own cream and green. The tokens on .team are only the warm
+   greys of the table and the chips; buttons, tick boxes and the focus ring use the general tokens. */
+
+.button-pill { border-radius: 999px; padding: 0 18px; gap: 8px; }
+.badge-danger { background: var(--danger-bg); color: var(--danger-text); }
+
+.team {
+  --team-line: var(--border-strong);
+  --team-head: #f0ede3;
+  --team-stripe: #f9f7f1;
+  --team-selected: #ebe8dc;
+  --team-chip: #ece9de;
+  --team-chip-text: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .team {
+    --team-head: #222b26;
+    --team-stripe: #1c241f;
+    --team-selected: #2b3830;
+    --team-chip: #27322b;
+  }
+}
+
+.team-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.team-toolbar .button-pill { flex: none; min-height: 48px; }
+
+.search { position: relative; flex: 1 1 0; min-width: 0; }
+.search-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); display: grid; color: var(--muted); pointer-events: none; }
+.search input { min-height: 48px; padding: 0 16px 0 46px; border: 1.5px solid var(--team-line); border-radius: 999px; }
+.search input:focus-visible { border-color: var(--primary); }
+
+/* A dialog above the page: a dark scrim, and a card that scrolls by itself when it is taller than the screen. */
+.modal-open { overflow: hidden; }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--scrim);
+}
+.modal {
+  position: relative;
+  width: min(32rem, 100%);
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 20px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--drawer-shadow);
+}
+.modal:focus { outline: none; }
+.modal h2 { margin-bottom: 4px; padding-right: 44px; }
+.modal .muted { margin-bottom: 16px; }
+.modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.modal-close:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.modal-close:disabled { opacity: 0.5; cursor: not-allowed; }
+.invite-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.invite-actions .button-pill { min-height: 48px; }
+
+.team-list-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 12px; }
+.team-list-head h2 { margin-bottom: 4px; color: var(--primary); font-size: 1.375rem; font-weight: 700; }
+
+.filter-bar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 16px; }
+.filter-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+
+.filter-chip,
+.filter-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--team-chip);
+  color: var(--team-chip-text);
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+.filter-chip { padding: 0 14px; }
+.filter-chip .icon { width: 16px; height: 16px; }
+.filter-add-button { width: 44px; padding: 0; }
+.filter-chip:hover, .filter-add-button:hover { background: var(--team-line); }
+
+/* Placed against the whole bar, not the "+", so it can never run past the right edge of a narrow screen. */
+.filter-menu {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(15rem, 100%);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--team-line);
+  border-radius: var(--radius);
+  box-shadow: var(--drawer-shadow);
+}
+.filter-menu button {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.filter-menu button:hover { background: var(--surface-2); }
+
+.feedback { margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius-sm); font-weight: 600; }
+.feedback-success { background: var(--paid-bg); color: var(--paid-text); }
+.feedback-error { background: var(--danger-bg); color: var(--danger-text); }
+
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--team-head);
+}
+.selection-count { font-weight: 700; }
+.selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; }
+
+.row-action {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.5px solid var(--team-line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.row-action:hover:not(:disabled) { background: var(--surface-2); }
+.row-action:disabled { opacity: 0.55; cursor: not-allowed; }
+.row-action-danger { border-color: var(--danger-text); color: var(--danger-text); }
+.row-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.875rem; font-weight: 600; }
+
+.team-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  border: 1px dashed var(--team-line);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+/* Tick boxes: a square with a thick edge, filled when ticked, a dash when only some rows are. */
+.check { display: grid; place-items: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.team input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  place-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  border: 2px solid var(--primary);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.team input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--primary);
+  transform: scale(0);
+  transition: transform 0.1s ease;
+}
+.team input[type="checkbox"]:checked::before { transform: scale(1); }
+.team input[type="checkbox"]:indeterminate::before { transform: scale(1); height: 3px; }
+.team input[type="checkbox"]:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The table. Narrow screens (the default) show each row as a small card, so a role and a button never wait behind
+   sideways scrolling; from 1024 px, where the sidebar leaves room for it, it is the table of the design. */
+.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--team-line); border-radius: var(--radius); }
+.table-scroll:focus { outline: none; }
+.team-table { display: block; width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+.team-table thead, .team-table tbody { display: block; }
+
+.team-table thead tr { display: flex; align-items: center; background: var(--team-head); }
+.team-table thead th { display: none; }
+.team-table thead th.cell-check { display: flex; align-items: center; gap: 4px; padding: 0; }
+.select-all-text { color: var(--primary); font-size: 0.875rem; font-weight: 600; }
+
+.team-table tbody tr {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  grid-template-areas: "check name name" "check role role" "check status status" "check actions actions";
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 12px 8px 0;
+  border-top: 1px solid var(--team-line);
+}
+.team-table tbody tr:first-child { border-top: 0; }
+.team-table tbody tr:nth-child(even) { background: var(--team-stripe); }
+.team-table tbody tr.is-selected { background: var(--team-selected); }
+.team-table tbody tr > * { min-width: 0; padding: 0; text-align: left; font-weight: 400; }
+
+/* Scoped to tbody: the header cells share these class names and must keep their own rules. */
+.team-table tbody .cell-check { grid-area: check; align-self: start; }
+.team-table tbody .cell-name { grid-area: name; }
+.team-table tbody .cell-role { grid-area: role; }
+.team-table tbody .cell-status { grid-area: status; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.team-table tbody .cell-actions { grid-area: actions; }
+
+.employee-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 600; overflow-wrap: anywhere; }
+.employee-email { display: block; color: var(--muted); font-size: 0.8125rem; font-weight: 400; overflow-wrap: anywhere; }
+.status-date { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
+.role-text { font-weight: 600; }
+
+.cell-role select { width: 100%; border: 1.5px solid var(--team-line); border-radius: 999px; }
+
+@media (min-width: 64rem) {
+  .team-table { display: table; }
+  .team-table thead { display: table-header-group; }
+  .team-table tbody { display: table-row-group; }
+  .team-table thead tr, .team-table tbody tr { display: table-row; padding: 0; border-top: 0; }
+  .team-table thead th, .team-table thead th.cell-check { display: table-cell; padding: 14px 12px; vertical-align: middle; }
+  .team-table thead th {
+    color: var(--primary);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .select-all-text { display: none; }
+  .team-table tbody tr > * { display: table-cell; padding: 10px 12px; vertical-align: middle; }
+  .team-table .cell-check { width: 52px; }
+  .team-table thead th.cell-check, .team-table tbody td.cell-check { padding: 0 4px; }
+  .team-table tbody td.cell-status { display: table-cell; }
+  .status-date { display: block; margin-top: 2px; }
+  .team-table .cell-actions { text-align: right; }
+  .cell-role select { min-width: 12rem; }
 }

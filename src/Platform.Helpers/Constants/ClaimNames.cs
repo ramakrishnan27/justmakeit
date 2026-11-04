@@ -14,4 +14,10 @@ public static class ClaimNames
     /// version goes up and a token carrying an older one is answered 401 <c>permissions_changed</c>: the person signs in again.
     /// </summary>
     public const string PermissionVersion = "pv";
+
+    /// <summary>
+    /// When the token was issued, in whole seconds since 1970 (the standard <c>iat</c> claim). A token issued at or before
+    /// the moment a person's access was changed or ended (<c>session_revocations</c>) is refused.
+    /// </summary>
+    public const string IssuedAt = "iat";
 }
