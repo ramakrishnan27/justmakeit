@@ -3,7 +3,7 @@ import { readRepositoryFile } from '@/test/repo';
 import { hasPermission, PERMISSIONS, satisfies, type PermissionKey } from './permissions';
 
 // The server defines the catalog. This reads its source, so a key added or renamed there fails here until the client follows.
-const serverSource = readRepositoryFile('src/Platform.Helpers/Constants/PermissionKeys.cs');
+const serverSource = readRepositoryFile('src/Platform.Core/Helpers/Constants/PermissionKeys.cs');
 const serverKeys = [...serverSource.matchAll(/public const string \w+ = "([a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+)";/g)].map((match) => match[1]);
 
 describe('PERMISSIONS', () => {

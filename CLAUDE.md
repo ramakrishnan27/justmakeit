@@ -3,7 +3,8 @@
 Multi-tenant email campaign platform. Each customer is an **organization** of one of three business models: a company,
 a marketing agency that serves several clients, or an individual creator. An organization has workspaces (one per client
 in an agency); each workspace has contacts, templates and campaigns. Only the **Email** channel is built; Facebook,
-Instagram, SMS, WhatsApp and YouTube exist as empty stubs so they can be added later as their own projects.
+Instagram, SMS, WhatsApp and YouTube are empty stubs that are **out of the solution** for now (see Working scope in the
+decisions log): their folders stay under `src/`, but they are not built, not referenced and not worked on.
 
 **Naming:** in the tables, code, routes and the token an organization is still called an **agency** (`agencies`,
 `agency_id`, `app.agency_id`, `/v1/auth/switch-agency`). `agency` is also one of the three business models, so read
@@ -29,24 +30,37 @@ needs to run). **Ask before adding any other.**
 
 ```
 JustMakeIt.sln  Directory.Build.props  global.json  docker-compose.yml  .env.example
-src/    Platform.Api  Platform.Auth  Platform.Email  Platform.Facebook  Platform.Instagram
-        Platform.Sms  Platform.WhatsApp  Platform.YouTube  Platform.Helpers  Platform.Infrastructure
+src/    Platform.Api  Platform.Core  Platform.Email
+        Platform.Core/ holds three folders, not three projects: Auth/  Helpers/  Infrastructure/
+        Platform.Facebook  Platform.Instagram  Platform.Sms  Platform.WhatsApp  Platform.YouTube
+            (empty stubs left on disk, NOT in JustMakeIt.sln and not referenced by Platform.Api)
 tests/  Platform.Helpers.Tests  Platform.Auth.Tests  Platform.Email.Tests  Platform.IntegrationTests
 web-react/  React frontend (see React frontend in the decisions log): the member app, and the Site admin sign-in and dashboard
 web/    older vanilla JavaScript frontend: site admin app, and the member app (sign in, create an account, role dashboard)
 ```
 
-Feature projects (Auth, Email, each channel) share one layout: `Controllers/ DTOs/ Models/ Interfaces/ Services/
-Repositories/`, plus `Providers/ Workers/ Settings/` in Email and `Settings/` in Auth, and a module class
-(`EmailModule.AddEmailChannel()` etc.) that registers everything.
+Feature projects (Email, each channel) and the `Auth/` folder of Platform.Core share one layout: `Controllers/ DTOs/
+Models/ Interfaces/ Services/ Repositories/`, plus `Providers/ Workers/ Settings/` in Email and `Settings/` in Auth, and a
+module class (`EmailModule.AddEmailChannel()` etc.) that registers everything.
 
-**Dependencies point one way.** Helpers references nothing. Infrastructure references Helpers. A channel references only
-Helpers and Infrastructure; channels never reference each other or Platform.Auth. Auth references Helpers and
-Infrastructure. Only Platform.Api references everything. No catch-all "Common" or "Shared" project.
+**Namespaces did not change when the three projects became folders.** `Platform.Core.csproj` sets `RootNamespace` to
+`Platform`, so `Platform.Core/Auth/Services` is still `Platform.Auth.Services`, `Helpers/Constants` is
+`Platform.Helpers.Constants` and `Infrastructure/Data` is `Platform.Infrastructure.Data`. A new file in one of those
+folders gets the right namespace from the IDE. The migration scripts are still embedded under the logical name
+`Migrations.<file>` (`DbMigrator` reads them by that name).
+
+**Dependencies point one way.** Platform.Core references no project of ours. A channel references only Platform.Core;
+channels never reference each other. Only Platform.Api references everything. No catch-all "Common" or "Shared" project.
+Inside Platform.Core the order is by convention only, because the compiler no longer checks it: `Helpers/` uses nothing
+from the other two folders, `Infrastructure/` uses `Helpers/`, `Auth/` uses both. **A channel must not use the
+`Platform.Auth` namespace.** Before Core existed the compiler refused it (a channel could not reference the Auth project);
+now it compiles, so keep to the rule yourself.
 
 One deployable (modular monolith): no microservices, no broker, no separate worker process. Background work is hosted
 services inside Platform.Api. Adding a channel = fill in its project + one `builder.Services.Add<Name>Channel()` line in
-`Program.cs`.
+`Program.cs`. For one of the five stubs that also means putting it back first: `dotnet sln JustMakeIt.sln add
+--solution-folder src src/Platform.<Name>/Platform.<Name>.csproj` and a `ProjectReference` to it in
+`src/Platform.Api/Platform.Api.csproj`.
 
 ## Commands
 
@@ -118,7 +132,7 @@ How long an invitation link lasts is `Auth:InvitationDays` (default 7, allowed 1
 
 ## Database
 
-- Scripts: `src/Platform.Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
+- Scripts: `src/Platform.Core/Infrastructure/Migrations/NNN_name.sql`, embedded, idempotent, applied in file-name order by
   `DbMigrator` (every start, one transaction, advisory lock). **Never edit a script that has run; add a new one.**
   `001_init.sql`, `002_site_admin.sql`, `003_business_models.sql`, `004_external_identities.sql` and
   `005_menus_permissions.sql` are released: do not change them. `006_remove_refresh_tokens.sql` drops the two refresh token
@@ -168,7 +182,7 @@ How long an invitation link lasts is `Auth:InvitationDays` (default 7, allowed 1
   page holds no token, sends no Authorization header and stores nothing); never queue or send a campaign while offline.
 - Ask before: changing an existing table, adding a package, weakening a security rule.
 - Do not: use EF Core, a CSS framework or jQuery, a second frontend framework next to React, edit an applied migration, give `app_user` BYPASSRLS,
-  commit secrets, write logic in the five channel stubs.
+  commit secrets, write logic in the five channel stubs (they are out of the solution; do not add them back unless asked).
 
 ## Build process
 
@@ -379,6 +393,13 @@ or was skipped, and any open question.
   the role may do (mirrors the server's policies; the server still decides), the workspaces (client workspaces in an agency;
   an organization admin of a company or agency can add one, a creator has the one made at sign-up), what is still to come for
   that role (labelled "Coming soon": none of it exists), and the token's user id and role.
+- Look of `/login` and `/register` (requested by the user, from a reference screenshot): cream and green, no card, the logo
+  top left (`web/brand-mark.svg`, `core/brand.js`), fields and buttons with 12 px corners, "Show" inside the password field.
+  The palette is set on `:root:has(.auth-brand)` in `web/css/app.css`, so it exists only while one of those two pages is
+  showing, with a dark variant; the dashboard and the site admin app (including `/admin/login`) still use the blue palette.
+  Colours were sampled from the reference: page `#fbfaf6`, green `#1f7a55`, text `#1a1d21`. Text pairs were checked against
+  WCAG AA; the field borders are as light as the reference, so they do not reach the 3:1 that non-text contrast asks for.
+  Left out because nothing behind them exists: "Forgot password?" and "Keep me logged in".
 - Not built then: inviting people into an organization (built since, see Team members and invitations), an organization
   switcher for people in several
   organizations, linking Google to an existing account (needs email verification first), changing a password, and the real
@@ -653,3 +674,17 @@ page; token expire time is 30 day limit"). Current; it supersedes every refresh-
 - **React.** `/account` (members only; behind sign-in, needs no permission, is not a menu page): the change-password form (current, new, the new one again; the repeat is checked in the page and never sent; fields are cleared on success; password-manager hints; a hidden username field). Reached from an **Account** link at the bottom of the sidebar and of the drawer (`AppShell`, members only: the Site admin app has none). The API serves `/account` with the shell on a reload (`MemberAppPages`). The default-password dialog of the Team page now says the person can change it under Account.
 - Tests: Auth.Tests 889 (the service, the request), the migration on both owners (every membership, only forward, a user required, the application role changes only its own row and cannot write revocations), `AccountApiTests` end to end (two devices, the older sessions void and the fresh one kept, the new password signs in and the old one does not, a wrong current password is a 400 and changes nothing, a Google account, nothing logged), the rate limit shared with sign-in, React 370. Checked by mutation (the verification, the one second back, the session ending) and with two real browsers.
 - Not built: a forced change at first sign-in, setting a first password for a Google account, a password change for the Site admin, an email to the person when it happens.
+
+**Platform.Core (requested by the user: "create new project Platform.Core, and move Platform.Auth, Platform.Helpers and Platform.Infrastructure into it, in a folder structure, not a project inside a project"). Status: built, tested; current, and it supersedes the layout in every entry above.**
+- `Platform.Auth`, `Platform.Helpers` and `Platform.Infrastructure` are **no longer projects**: their files (moved with `git mv`, so history follows) are the folders `Auth/`, `Helpers/` and `Infrastructure/` of one project, `src/Platform.Core/Platform.Core.csproj`. Wherever an entry above says "the Auth project", "the Helpers project" or `src/Platform.Infrastructure/...`, read the folder in Platform.Core (for example `src/Platform.Core/Infrastructure/Migrations/005_menus_permissions.sql`). The three old folders and their `.csproj` files are gone. The test projects keep their names (`Platform.Auth.Tests`, `Platform.Helpers.Tests`) and now reference Platform.Core.
+- **Namespaces were not renamed** (my choice, not the user's request; the cheaper one to undo): `RootNamespace` is `Platform`, so the folders give exactly the namespaces the code already had, and no file outside the moved folders changed except project references and the paths below. Renaming them to `Platform.Core.Auth.*` etc. would touch about 250 files across `src` and `tests` and is a mechanical follow-up if wanted. The data-protection purpose string `Platform.Auth.GoogleOAuthState.v1` is a string, not a namespace: it must not be renamed.
+- **Packages:** the same four, same versions, nothing added (CsvHelper, Dapper, Npgsql 8.0.9, Microsoft.AspNetCore.Authentication.JwtBearer). Core has the `Microsoft.AspNetCore.App` framework reference, so Helpers, which had none, now compiles against ASP.NET too (no name clashes: the build has 0 warnings).
+- **What the merge costs, on purpose.** The old rule "channels never reference Platform.Auth" was enforced by the compiler; it is now a convention (see the dependency rule above), because a channel that references Core can see the Auth folder. No test enforces it yet. An architecture test that fails when a channel's source uses `Platform.Auth` was offered, not built.
+- **Updated alongside:** the solution (Core added under `src`, the three projects removed), the `ProjectReference`s of Api, Email and the five stubs, and the paths that the frontend contract tests read (`web/tests/icons`, `menu-seeds`, `permission-keys` and `web-react/src/lib/team`, `navigation/pages`, `access/permissions`, `components/icons` tests, plus the comment in `api/types.ts`). `003_business_models.sql` still says "Platform.Auth has the same table" in a comment; it is a released script, so it was left alone.
+- **Checked:** `dotnet build tests/Platform.IntegrationTests -c Verify` (the whole API and everything under it): 0 warnings, 0 errors. All nine migration scripts are in `Platform.Core.dll` under `Migrations.<file>`. Tests: Helpers.Tests 99, Auth.Tests 889, IntegrationTests without Docker 297, `node --test` 280 (the same 280 as on a clean checkout of the commit before), Vitest 370. Docker-tagged tests ran on a private PostgreSQL 18 cluster (not 16, not Testcontainers): all of `Infrastructure` (329: every migration on a superuser and on a limited owner, row-level security, the connection factory, the repositories) and six end-to-end API classes (98: startup and health, account, workspaces, menus, team, Site admin). **Not run:** the other Docker-tagged API classes (login, register, Google, cookies, rate limits and so on), which this change cannot reach, and a plain `dotnet build JustMakeIt.sln`, because Visual Studio holds `src/Platform.Api/bin` (the `Verify` configuration was used instead).
+
+**Working scope: the five channel stubs are out of the solution (requested by the user: "exclude Platform.Facebook, Platform.Sms, Platform.WhatsApp, Platform.Instagram and Platform.YouTube, not include these projects in build, debug and in coding. Let's only work on Platform.Email, Platform.Api, Platform.Core and the UI (web-react)"). Status: done and checked.**
+- The user wrote "Platform.Instagram.API" in the list of projects to keep; Instagram is also in the list to exclude, so it was read as `Platform.Api` (the API host, which has to stay). Say so if that was wrong.
+- **What changed:** the five projects were removed from `JustMakeIt.sln` (7 projects are left: Api, Core, Email and the four test projects) and the five `ProjectReference`s were removed from `src/Platform.Api/Platform.Api.csproj`. Nothing else referenced them (`Program.cs` never called their modules, no test used them), so no behaviour changed. **Their folders, with the module class and `.gitkeep` files, were left on disk and tracked**, so nothing is lost and a stub can be put back with the two steps under "Adding a channel" above; deleting the folders is the next step if the user wants them gone.
+- **Scope for sessions:** work only in `Platform.Email`, `Platform.Api`, `Platform.Core`, the tests of those, and `web-react/`. The older `web/` app was not named: leave it as it is (it is still what the API serves, see React frontend).
+- Checked: `dotnet build JustMakeIt.sln -c Release` (0 warnings, 0 errors; Release because a running `Platform.Api` held the Debug output), Helpers.Tests 99, Auth.Tests 889, IntegrationTests without Docker 297. One of the 297 failed once on the first run, while the machine was busy with the build, and passed on three reruns; its name was not captured (the 1-second-window rate limit test is the known timing-sensitive one, so that is the likely cause, not confirmed). Docker-tagged tests were not rerun: this change cannot reach them.

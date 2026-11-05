@@ -18,7 +18,7 @@ import { hasTeam, rolesFor, upcomingAreas } from './roles';
 
 // The roles an organization may give its people are the server's rule (BusinessModelRules.AllowedRoles, which the
 // database repeats as a CHECK). The invite form and the role selects offer what rolesFor says, so they must agree.
-const rules = readRepositoryFile('src/Platform.Auth/Services/BusinessModelRules.cs');
+const rules = readRepositoryFile('src/Platform.Core/Auth/Services/BusinessModelRules.cs');
 
 function serverRoles(model: 'Company' | 'Agency' | 'Creator'): string[] {
   const list = new RegExp(`${model}Roles\\s*=\\s*\\[([^\\]]*)\\]`, 's').exec(rules)?.[1] ?? '';

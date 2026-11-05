@@ -1,4 +1,4 @@
-// The shapes the API sends and receives. They mirror the server's DTOs (Platform.Auth/DTOs); the server's JSON is
+// The shapes the API sends and receives. They mirror the server's DTOs (Platform.Core/Auth/DTOs); the server's JSON is
 // camelCase, and the roles and business models are lower-case words.
 
 export type BusinessModel = 'company' | 'agency' | 'creator';

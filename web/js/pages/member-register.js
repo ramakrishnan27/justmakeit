@@ -1,3 +1,4 @@
+import { authHeader } from '../core/brand.js';
 import { h } from '../core/dom.js';
 import { googleRegisterPath, loadProviders, takeErrorCode } from '../core/google.js';
 import { messageForGoogleError, messageForRegisterError, validateRegistration } from '../core/messages.js';
@@ -193,11 +194,11 @@ class MemberRegister extends HTMLElement {
     this.replaceChildren(
       h(
         'main',
-        { id: 'main', class: 'auth-page' },
+        { id: 'main', class: 'auth-page auth-brand' },
+        authHeader(),
         h(
           'section',
           { class: 'card auth-card auth-card-wide', 'aria-labelledby': 'register-title' },
-          h('p', { class: 'brand' }, 'Platform'),
           h('h1', { id: 'register-title', tabindex: '-1' }, 'Create your account'),
           h('p', { class: 'muted' }, 'Choose how you work, then how you want to sign up.'),
           form,

@@ -1,3 +1,4 @@
+import { authHeader } from '../core/brand.js';
 import { h } from '../core/dom.js';
 import { googleLoginPath, loadProviders, takeErrorCode } from '../core/google.js';
 import { messageForGoogleError, messageForSignInError, validateSignIn } from '../core/messages.js';
@@ -91,13 +92,13 @@ class MemberLogin extends HTMLElement {
     this.replaceChildren(
       h(
         'main',
-        { id: 'main', class: 'auth-page' },
+        { id: 'main', class: 'auth-page auth-brand' },
+        authHeader(),
         h(
           'section',
           { class: 'card auth-card', 'aria-labelledby': 'login-title' },
-          h('p', { class: 'brand' }, 'Platform'),
-          h('h1', { id: 'login-title', tabindex: '-1' }, 'Sign in'),
-          h('p', { class: 'muted' }, 'Welcome back. Sign in to your organization.'),
+          h('h1', { id: 'login-title', tabindex: '-1' }, 'Welcome back'),
+          h('p', { class: 'muted' }, 'Sign in to your organization.'),
           googleRegion,
           form,
           h('p', { class: 'auth-switch' }, 'New here? ', h('a', { href: '/register', 'data-link': true }, 'Create an account')),

@@ -5,8 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Platform.Helpers\Platform.Helpers.csproj" />
-    <ProjectReference Include="..\Platform.Infrastructure\Platform.Infrastructure.csproj" />
+    <ProjectReference Include="..\Platform.Core\Platform.Core.csproj" />
   </ItemGroup>
 
 </Project>

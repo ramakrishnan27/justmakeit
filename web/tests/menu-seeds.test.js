@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { adminApp, memberApp } from '../js/core/router.js';
 
-const script = readFileSync(new URL('../../src/Platform.Infrastructure/Migrations/005_menus_permissions.sql', import.meta.url), 'utf8');
+const script = readFileSync(new URL('../../src/Platform.Core/Infrastructure/Migrations/005_menus_permissions.sql', import.meta.url), 'utf8');
 
 // ('member', 'workspaces',  '/workspaces',  'Workspaces',  'workspaces.view',  'Workspaces', 'folder', 20, false)
 const seededPages = [...script.matchAll(/\('(member|admin)',\s*'([a-z-]+)',\s*'(\/[^']*)',\s*'[^']*',\s*(NULL|'[^']*')/g)].map((match) => ({

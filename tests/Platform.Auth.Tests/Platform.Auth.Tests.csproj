@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Platform.Auth\Platform.Auth.csproj" />
+    <ProjectReference Include="..\..\src\Platform.Core\Platform.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

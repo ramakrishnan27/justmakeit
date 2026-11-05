@@ -8,8 +8,8 @@ import { pages } from './pages';
 // page table's rows. They must say the same thing, or a menu item would open a page the client does not have, or the
 // client would guard a page with another permission than the server's menu does. This reads the seed script and compares.
 const script = [
-  'src/Platform.Infrastructure/Migrations/005_menus_permissions.sql',
-  'src/Platform.Infrastructure/Migrations/007_team_members.sql',
+  'src/Platform.Core/Infrastructure/Migrations/005_menus_permissions.sql',
+  'src/Platform.Core/Infrastructure/Migrations/007_team_members.sql',
 ]
   .map(readRepositoryFile)
   .join('\n');

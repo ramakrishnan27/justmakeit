@@ -5,7 +5,7 @@ import { Icon } from './Icon';
 import { iconNames, iconPaths, resolveIcon } from './icons';
 
 // The server decides which icons a menu item may use. This reads its list, so one added there fails here until it is drawn.
-const serverSource = readRepositoryFile('src/Platform.Auth/Services/MenuIcons.cs');
+const serverSource = readRepositoryFile('src/Platform.Core/Auth/Services/MenuIcons.cs');
 const serverIcons = [...(serverSource.match(/All\s*=\s*\[([^\]]*)\]/s)?.[1] ?? '').matchAll(/"([a-z][a-z0-9-]*)"/g)].map((match) => match[1]);
 
 describe('iconNames', () => {

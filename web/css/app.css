@@ -354,6 +354,104 @@ fieldset.field label.choice {
   .workspace-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* ---------- Member sign-in and sign-up: cream and green ----------
+   The palette is set on the whole document while one of these two pages is showing (so the body behind them matches),
+   and goes away with them: the dashboard and the site admin app keep the blue one. */
+
+:root:has(.auth-brand) {
+  --bg: #fbfaf6;
+  --surface: #ffffff;
+  --surface-2: #f2f0e8;
+  --text: #1a1d21;
+  --muted: #5d6570;
+  --border: #e3e0d6;
+  --border-strong: #c4c0b2;
+  --primary: #1f7a55;
+  --primary-hover: #17634a;
+  --on-primary: #ffffff;
+  --accent-bg: #e6f2ec;
+  --accent-text: #17634a;
+  --focus: #1f7a55;
+  --radius-sm: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:has(.auth-brand) {
+    --bg: #111613;
+    --surface: #19201c;
+    --surface-2: #222b26;
+    --text: #eef2ee;
+    --muted: #9fb0a6;
+    --border: #2a352f;
+    --border-strong: #4a5a50;
+    --primary: #46b988;
+    --primary-hover: #63cc9d;
+    --on-primary: #08140d;
+    --accent-bg: #17382a;
+    --accent-text: #bfeed7;
+    --focus: #63cc9d;
+  }
+}
+
+/* The logo sits top left; the form below it is centred on the page with no card around it. */
+.auth-brand.auth-page { display: flex; flex-direction: column; align-items: stretch; padding: 0; }
+
+.auth-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 16px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+.brand-mark { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+
+.auth-brand .auth-card {
+  align-self: center;
+  max-width: 432px;
+  margin: clamp(8px, 6vh, 64px) 0 48px;
+  padding: 0 16px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.auth-brand .auth-card-wide { max-width: 552px; }
+
+.auth-brand .auth-card h1 { margin: 0 0 8px; font-size: 1.875rem; line-height: 1.15; letter-spacing: -0.02em; }
+.auth-brand .auth-card .muted { margin-bottom: 24px; }
+.auth-brand .auth-switch { margin-top: 24px; font-size: 0.9375rem; }
+
+/* The general focus rule rounds a focused control to 4px; keep the control's own corners. */
+.auth-brand :focus-visible { border-radius: var(--radius-sm); }
+
+.auth-brand .field label,
+.auth-brand fieldset.field legend { font-size: 0.875rem; }
+
+.auth-brand input:not([type="radio"]) { min-height: 48px; padding: 0 14px; border-color: var(--border-strong); }
+.auth-brand input:focus-visible { border-color: var(--primary); }
+
+.auth-brand .button-primary,
+.auth-brand .button-google { min-height: 48px; }
+.auth-brand .button-google { border-color: var(--border-strong); }
+
+/* "Show" and "Hide" sit inside the password field, at its right edge; the whole height of the field is the tap target. */
+.auth-brand .input-row { position: relative; }
+.auth-brand .input-row input { padding-right: 72px; }
+.auth-brand .input-row .button-quiet {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  bottom: 0;
+  min-height: 0;
+  padding: 0 12px;
+  font-size: 0.875rem;
+}
+.auth-brand .button-quiet:hover:not(:disabled) { background: transparent; text-decoration: underline; }
+
+@media (min-width: 720px) {
+  .auth-header { padding: 24px 32px; }
+}
+
 /* ---------- The app shell: header, sidebar and page ----------
    Narrower than 720 px the sidebar is a drawer, opened by the menu button; from 720 px it is a column beside the page.
    The colours come from the page's own tokens, so the dark scheme and the cream palette need nothing of their own. */

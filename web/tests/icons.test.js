@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createIcon, iconLabel, iconNames, resolveIcon } from '../js/core/icons.js';
 
 // The server decides which icons a menu item may use. This reads its list, so one added there fails here until it is drawn.
-const serverSource = readFileSync(new URL('../../src/Platform.Auth/Services/MenuIcons.cs', import.meta.url), 'utf8');
+const serverSource = readFileSync(new URL('../../src/Platform.Core/Auth/Services/MenuIcons.cs', import.meta.url), 'utf8');
 const serverIcons = [...(serverSource.match(/All\s*=\s*\[([^\]]*)\]/s)?.[1] ?? '').matchAll(/"([a-z][a-z0-9-]*)"/g)].map((match) => match[1]);
 
 describe('iconNames', () => {

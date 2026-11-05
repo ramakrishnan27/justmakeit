@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { hasPermission, permissionKeys } from '../js/core/permission-keys.js';
 
 // The server defines the catalog. This reads its source, so a key added or renamed there fails here until the client follows.
-const serverSource = readFileSync(new URL('../../src/Platform.Helpers/Constants/PermissionKeys.cs', import.meta.url), 'utf8');
+const serverSource = readFileSync(new URL('../../src/Platform.Core/Helpers/Constants/PermissionKeys.cs', import.meta.url), 'utf8');
 const serverKeys = [...serverSource.matchAll(/public const string \w+ = "([a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+)";/g)].map((match) => match[1]);
 
 describe('permissionKeys', () => {
