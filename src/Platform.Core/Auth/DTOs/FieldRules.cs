@@ -161,4 +161,42 @@ internal static class FieldRules
     }
 
     public const int MaxMenuLabelLength = 60;
+
+    public const int MaxChannelNameLength = 60;
+    public const int MaxChannelDescriptionLength = 300;
+
+    /// <summary>The name of a channel. Trimmed before it is stored; no line breaks or other control characters. Whether it is taken is the database's answer.</summary>
+    public static void ChannelName(ValidationErrors errors, string field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(field, "Name is required.");
+        }
+        else if (value.Trim().Length > MaxChannelNameLength)
+        {
+            errors.Add(field, $"Name must be at most {MaxChannelNameLength} characters.");
+        }
+        else if (value.Any(char.IsControl))
+        {
+            errors.Add(field, "Name cannot contain line breaks or other control characters.");
+        }
+    }
+
+    /// <summary>What a channel is for. Optional; one line.</summary>
+    public static void ChannelDescription(ValidationErrors errors, string field, string? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        if (value.Trim().Length > MaxChannelDescriptionLength)
+        {
+            errors.Add(field, $"Description must be at most {MaxChannelDescriptionLength} characters.");
+        }
+        else if (value.Any(char.IsControl))
+        {
+            errors.Add(field, "Description cannot contain line breaks or other control characters.");
+        }
+    }
 }

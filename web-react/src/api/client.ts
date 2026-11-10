@@ -25,6 +25,7 @@ export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface RequestOptions {
   method?: string;
+  /** Sent as JSON, except a FormData, which is sent as the form it is (a file upload). */
   body?: unknown;
   /**
    * false for the calls that are not made inside a session (signing in, signing up, signing out): a 401 there is the
@@ -46,7 +47,9 @@ export function createApiClient({
 
   function send(path: string, { method = 'GET', body }: { method?: string; body?: unknown } = {}) {
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (body !== undefined) {
+    // A form (a file upload) goes as it is: the browser writes its own Content-Type, which carries the boundary.
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    if (body !== undefined && !isForm) {
       headers['Content-Type'] = 'application/json';
     }
 
@@ -54,7 +57,7 @@ export function createApiClient({
     return fetchFn(path, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
       credentials: 'same-origin',
     });
   }

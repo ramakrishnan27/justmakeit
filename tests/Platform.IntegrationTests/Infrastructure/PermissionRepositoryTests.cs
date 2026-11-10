@@ -11,7 +11,7 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// no user, exactly as the permission cache does while a person is still signing in.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class PermissionRepositoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;
@@ -40,7 +40,7 @@ public sealed class PermissionRepositoryTests(PostgresFixture postgres) : IAsync
         Assert.Equal(slots.Count, snapshot.Granted.Count);
         foreach (var (model, role) in slots)
         {
-            var expected = PermissionKeys.All.Where(key => role.GrantedByDefault(key)).Order(StringComparer.Ordinal);
+            var expected = PermissionKeys.All.Where(key => role.GrantedByDefault(model, key)).Order(StringComparer.Ordinal);
             Assert.Equal(expected, snapshot.Granted[(model, role)]);
         }
     }

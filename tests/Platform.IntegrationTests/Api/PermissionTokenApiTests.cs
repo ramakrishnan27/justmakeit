@@ -15,7 +15,7 @@ namespace Platform.IntegrationTests.Api;
 /// the new permissions). There is no refresh, so signing in again is the only way to a current token.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class PermissionTokenApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private static string[] PermissionsIn(string accessToken) =>

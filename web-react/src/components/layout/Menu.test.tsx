@@ -80,7 +80,7 @@ describe('<Menu>', () => {
   });
 
   it('draws the circle for an icon it does not know, so a newer server never leaves a gap', () => {
-    renderMenu({ items: [{ ...dashboard, icon: 'sparkles' }] });
+    renderMenu({ items: [{ ...dashboard, icon: 'rocket' }] });
 
     expect(screen.getByRole('navigation').querySelectorAll('svg.icon path')).toHaveLength(1);
   });

@@ -33,7 +33,10 @@ public sealed class ApiHostFactory(
         ["ConnectionStrings:App"] = UnreachableConnectionString,
         ["ConnectionStrings:Migrator"] = null,
         ["Database:MigrateOnStartup"] = "false",
-        ["Cors:WebOrigin"] = ""
+        ["Cors:WebOrigin"] = "",
+        // The content publishing worker looks across organizations on a timer; a test host starts without it, and a test of
+        // publishing switches it on (and the fake publisher) for itself.
+        ["Content:Publishing:WorkerEnabled"] = "false"
     };
 
     /// <summary>The key this host validates tokens with, for tests that mint a token of their own shape.</summary>

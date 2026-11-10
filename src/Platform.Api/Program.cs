@@ -1,13 +1,17 @@
 using Platform.Api.Extensions;
 using Platform.Api.Middleware;
 using Platform.Auth;
+using Platform.Content;
 using Platform.Email;
 using Platform.Infrastructure;
+using Platform.Media;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddInfrastructure();
 builder.Services.AddAuthModule();
+builder.Services.AddContentModule();
+builder.Services.AddMediaModule();
 builder.Services.AddEmailChannel();
 // Adding a channel: fill in its project, then add one line here, for example builder.Services.AddSmsChannel();
 

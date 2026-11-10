@@ -34,7 +34,25 @@ public sealed class SiteAdminDashboardService(ISiteAdminRepository siteAdmins, I
         return new PagedResult<SiteAgencyResponse>
         {
             Items = result.Items
-                .Select(a => new SiteAgencyResponse(a.Id, a.Name, a.BusinessModel, a.Plan, a.CreatedAt, a.MemberCount, a.WorkspaceCount))
+                .Select(a => new SiteAgencyResponse(a.Id, a.Name, a.BusinessModel, a.Plan, a.CreatedAt, a.MemberCount, a.WorkspaceCount, a.IsActive, a.ChannelCount))
+                .ToList(),
+            Page = query.Page,
+            PageSize = query.PageSize,
+            TotalCount = result.TotalCount
+        };
+    }
+
+    public async Task<PagedResult<SiteMemberResponse>> ListMembersAsync(SiteMembersQuery query, CancellationToken cancellationToken)
+    {
+        query.Validate().ThrowIfAny();
+
+        var userId = RequireSiteAdmin();
+        var result = await siteAdmins.ListMembersAsync(userId, query.Page, query.PageSize, cancellationToken);
+
+        return new PagedResult<SiteMemberResponse>
+        {
+            Items = result.Items
+                .Select(m => new SiteMemberResponse(m.UserId, m.FullName, m.Email, m.AgencyId, m.AgencyName, m.BusinessModel, m.Role, m.IsActive, m.JoinedAt))
                 .ToList(),
             Page = query.Page,
             PageSize = query.PageSize,
@@ -44,11 +62,5 @@ public sealed class SiteAdminDashboardService(ISiteAdminRepository siteAdmins, I
 
     // The SiteAdmin policy already stopped everyone else, and the database function checks again.
     // This is the same rule at the service, so no other caller can skip it.
-    private Guid RequireSiteAdmin()
-    {
-        var userId = tenant.RequireUserId();
-        return tenant.Role == RoleNames.SiteAdmin
-            ? userId
-            : throw new ForbiddenException("Site admin access is required.", "not_site_admin");
-    }
+    private Guid RequireSiteAdmin() => SiteAdminGuard.Require(tenant);
 }

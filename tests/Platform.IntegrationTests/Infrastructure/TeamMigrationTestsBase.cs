@@ -78,7 +78,7 @@ public abstract partial class TeamMigrationTestsBase(PostgresFixture postgres) :
         var id = userId ?? Guid.NewGuid();
         await using var app = await Db.OpenAppAsync(null, id);
         return await app.QuerySingleAsync<(Guid AgencyId, string Role)>(
-            "SELECT agency_id, role FROM invitation_accept(@hash, @id, 'New Person', @passwordHash, @provider, @subject, @providerEmail)",
+            "SELECT agency_id, role FROM invitation_accept_v2(@hash, @id, 'New Person', @passwordHash, @provider, @subject, @providerEmail)",
             new { hash, id, passwordHash, provider, subject, providerEmail });
     }
 
@@ -741,15 +741,17 @@ public abstract partial class TeamMigrationTestsBase(PostgresFixture postgres) :
     private static readonly string[] CallableByApp =
     [
         "team_members_v2()", "team_change_role_v2(uuid, text)", "team_remove_member_v2(uuid)", "team_set_member_active(uuid, boolean)",
-        "team_activate_invitation(uuid, uuid, text)", "auth_email_registered(text)", "invitation_find(text)", "invitation_find_v2(text)",
-        "invitation_accept(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()", "auth_end_own_sessions()"
+        "team_activate_invitation(uuid, uuid, text)", "auth_email_registered(text)", "invitation_find(text)", "invitation_find_v3(text)",
+        "invitation_accept_v2(text, uuid, text, text, text, text, text)", "session_revocations_snapshot()", "auth_end_own_sessions()"
     ];
 
-    // The 007 team functions are reached only through the 008 ones, which are definers too.
+    // The 007 team functions are reached only through the 008 ones, which are definers too; the invitation ones through the 011 versions
+    // (which know about a deactivated organization).
     private static readonly string[] InternalOnly =
     [
         "org_caller_holds(text)", "org_caller_manages()", "team_end_sessions(uuid, uuid)",
-        "team_list_members()", "team_change_role(uuid, text)", "team_remove_member(uuid)"
+        "team_list_members()", "team_change_role(uuid, text)", "team_remove_member(uuid)",
+        "invitation_find_v2(text)", "invitation_accept(text, uuid, text, text, text, text, text)"
     ];
 
     [Fact]
@@ -829,7 +831,7 @@ public abstract partial class TeamMigrationTestsBase(PostgresFixture postgres) :
 }
 
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class TeamMigrationTests(PostgresFixture postgres) : TeamMigrationTestsBase(postgres)
 {
     protected override Task<TestDatabase> CreateDatabaseAsync(PostgresFixture fixture) => fixture.CreateDatabaseAsync();
@@ -841,7 +843,7 @@ public sealed class TeamMigrationTests(PostgresFixture postgres) : TeamMigration
 /// here, and would work only for a superuser.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class TeamMigrationWithLimitedOwnerTests(PostgresFixture postgres) : TeamMigrationTestsBase(postgres)
 {
     protected override Task<TestDatabase> CreateDatabaseAsync(PostgresFixture fixture) => fixture.CreateDatabaseWithLimitedOwnerAsync();

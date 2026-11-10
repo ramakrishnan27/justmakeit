@@ -102,6 +102,66 @@ public sealed class RolePermissionsTests
     public void GrantedByDefault_IsTheMatrixThatTheDatabaseIsSeededWith(OrganizationRole role, string key, bool expected) =>
         Assert.Equal(expected, role.GrantedByDefault(key));
 
+    [Theory]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.ContentStudioCreate, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.ContentStudioCreate, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.ContentStudioCreate, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.ContentStudioCreate, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.ContentStudioPublish, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.ContentStudioPublish, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.ContentStudioPublish, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.ContentStudioPublish, false)]
+    public void GrantedByDefault_OfTheContentStudioKeys_ForARoleInEveryModelItIsIn(OrganizationRole role, string key, bool expected) =>
+        Assert.Equal(expected, role.GrantedByDefault(key));
+
+    [Theory]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.MediaLibraryCreate, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.MediaLibraryCreate, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.MediaLibraryCreate, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.MediaLibraryCreate, true)]
+    [InlineData(OrganizationRole.OrganizationAdmin, PermissionKeys.MediaLibraryDelete, true)]
+    [InlineData(OrganizationRole.ClientManager, PermissionKeys.MediaLibraryDelete, false)]
+    [InlineData(OrganizationRole.MarketingManager, PermissionKeys.MediaLibraryDelete, true)]
+    [InlineData(OrganizationRole.ContentWriter, PermissionKeys.MediaLibraryDelete, false)]
+    public void GrantedByDefault_OfTheMediaLibraryKeys_ForARoleInEveryModelItIsIn(OrganizationRole role, string key, bool expected) =>
+        Assert.Equal(expected, role.GrantedByDefault(key));
+
+    [Theory]
+    [InlineData(BusinessModel.Company, false)]
+    [InlineData(BusinessModel.Agency, false)]
+    [InlineData(BusinessModel.Creator, true)]
+    public void AContentWriterPublishesOnlyInAnIndividualCreatorsOrganization(BusinessModel model, bool expected) =>
+        Assert.Equal(expected, OrganizationRole.ContentWriter.GrantedByDefault(model, PermissionKeys.ContentStudioPublish));
+
+    [Theory]
+    [InlineData(BusinessModel.Company, false)]
+    [InlineData(BusinessModel.Agency, false)]
+    [InlineData(BusinessModel.Creator, true)]
+    public void AContentWriterDeletesMediaOnlyInAnIndividualCreatorsOrganization(BusinessModel model, bool expected) =>
+        Assert.Equal(expected, OrganizationRole.ContentWriter.GrantedByDefault(model, PermissionKeys.MediaLibraryDelete));
+
+    [Fact]
+    public void TheModelAwareDefault_DiffersFromTheRoleOnlyOneInExactlyTheCreatorsContentWritersSlots()
+    {
+        var differences = new List<string>();
+        foreach (var model in Enum.GetValues<BusinessModel>())
+        {
+            foreach (var role in model.AllowedRoles())
+            {
+                foreach (var key in PermissionKeys.All)
+                {
+                    if (role.GrantedByDefault(model, key) != role.GrantedByDefault(key))
+                    {
+                        differences.Add($"{model}/{role} {key}");
+                    }
+                }
+            }
+        }
+
+        // Where a creator works alone, the content writer also publishes and also takes files out of the Media Library.
+        Assert.Equal(["Creator/ContentWriter contentstudio.publish", "Creator/ContentWriter medialibrary.delete"], differences);
+    }
+
     [Fact]
     public void GrantedByDefault_HasAnAnswerForEveryRoleAndEveryKey_SoANewKeyCannotBeForgotten()
     {

@@ -4,7 +4,7 @@ using Platform.IntegrationTests.Infrastructure;
 namespace Platform.IntegrationTests.Api;
 
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class LoginAndSessionApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private Task<HttpResponseMessage> LoginRawAsync(string email, string password = ApiTestHost.DefaultPassword, Guid? agencyId = null) =>

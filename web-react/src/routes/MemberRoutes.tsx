@@ -7,7 +7,7 @@ import AccountPage from '@/features/account/AccountPage';
 import LoginPage from '@/features/auth/LoginPage';
 import RegisterPage from '@/features/auth/RegisterPage';
 import { useApp } from '@/navigation/AppContext';
-import { pages } from '@/navigation/pages';
+import { pages, subPages } from '@/navigation/pages';
 
 /**
  * Every address of the member app. The pages behind sign-in come from the page table: each is wrapped in a permission
@@ -29,7 +29,7 @@ export function MemberRoutes() {
       </Route>
 
       <Route element={<RequireAuth />}>
-        {pages.map(({ key, path, permission, Component }) => (
+        {[...pages, ...subPages].map(({ key, path, permission, Component }) => (
           <Route
             key={key}
             path={path}

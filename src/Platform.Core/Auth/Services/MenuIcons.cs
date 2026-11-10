@@ -8,7 +8,7 @@ namespace Platform.Auth.Services;
 public static class MenuIcons
 {
     public static readonly IReadOnlyList<string> All =
-        ["home", "folder", "menu", "shield", "users", "mail", "chart", "settings", "list", "circle"];
+        ["home", "folder", "menu", "shield", "users", "mail", "chart", "settings", "list", "edit", "image", "sparkles", "calendar", "circle"];
 
     public static bool IsKnown(string? icon) => icon is not null && All.Contains(icon);
 }

@@ -53,7 +53,7 @@ public sealed class MenuRequestsTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("Home")]
-    [InlineData("sparkles")]
+    [InlineData("rocket")]
     [InlineData("home ")]
     [InlineData("../home")]
     [InlineData("<script>")]

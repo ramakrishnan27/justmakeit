@@ -17,7 +17,7 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// would never get a database to look at.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class MenuPermissionsWithLimitedOwnerTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;
@@ -61,11 +61,11 @@ public sealed class MenuPermissionsWithLimitedOwnerTests(PostgresFixture postgre
     {
         await using var owner = await _db.OpenOwnerAsync();
 
-        Assert.Equal(7, await DbTestSupport.CountAsync(owner, "permissions"));
-        Assert.Equal(56, await DbTestSupport.CountAsync(owner, "role_permissions"));
+        Assert.Equal(16, await DbTestSupport.CountAsync(owner, "permissions"));
+        Assert.Equal(128, await DbTestSupport.CountAsync(owner, "role_permissions"));
         Assert.Equal(1, await DbTestSupport.CountAsync(owner, "permission_state"));
-        Assert.Equal(6, await DbTestSupport.CountAsync(owner, "menu_pages"));
-        Assert.Equal(6, await DbTestSupport.CountAsync(owner, "menu_items"));
+        Assert.Equal(13, await DbTestSupport.CountAsync(owner, "menu_pages"));
+        Assert.Equal(13, await DbTestSupport.CountAsync(owner, "menu_items"));
         Assert.Equal(0, await DbTestSupport.CountAsync(owner, "menu_pages WHERE NOT default_item_created"));
     }
 
@@ -79,8 +79,8 @@ public sealed class MenuPermissionsWithLimitedOwnerTests(PostgresFixture postgre
         await _db.MigrateAsync();
 
         Assert.Equal(version, await owner.ExecuteScalarAsync<long>("SELECT version FROM permission_state"));
-        Assert.Equal(56, await DbTestSupport.CountAsync(owner, "role_permissions"));
-        Assert.Equal(6, await DbTestSupport.CountAsync(owner, "menu_items"));
+        Assert.Equal(128, await DbTestSupport.CountAsync(owner, "role_permissions"));
+        Assert.Equal(13, await DbTestSupport.CountAsync(owner, "menu_items"));
     }
 
     [Fact]
@@ -88,8 +88,8 @@ public sealed class MenuPermissionsWithLimitedOwnerTests(PostgresFixture postgre
     {
         await using var anonymous = await _db.OpenAppAsync();
 
-        Assert.Equal(56, (await anonymous.QueryAsync("SELECT * FROM permission_snapshot()")).Count());
-        Assert.Equal(6, (await anonymous.QueryAsync("SELECT * FROM menu_snapshot()")).Count());
+        Assert.Equal(128, (await anonymous.QueryAsync("SELECT * FROM permission_snapshot()")).Count());
+        Assert.Equal(13, (await anonymous.QueryAsync("SELECT * FROM menu_snapshot()")).Count());
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class MenuPermissionsWithLimitedOwnerTests(PostgresFixture postgre
         Assert.Equal(version + 1, await owner.ExecuteScalarAsync<long>("SELECT version FROM permission_state"));
         Assert.False(await owner.ExecuteScalarAsync<bool>(
             "SELECT is_granted FROM role_permissions WHERE business_model = 'agency' AND role = 'marketingmanager' AND permission_key = 'data.write'"));
-        Assert.Equal(5, await DbTestSupport.CountAsync(owner, "menu_items"));
+        Assert.Equal(12, await DbTestSupport.CountAsync(owner, "menu_items"));
     }
 
     [Fact]

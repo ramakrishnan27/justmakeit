@@ -21,14 +21,14 @@ export default function WorkspacesPage() {
 
   return (
     <>
-      <PageTitle documentTitle="Workspaces">{words.many}</PageTitle>
-      <p className="muted">{`The workspaces of ${organization.name || 'your organization'}.`}</p>
+      <PageTitle documentTitle={words.many === 'Your workspace' ? 'Workspaces' : words.many}>{words.many}</PageTitle>
+      <p className="muted">{`The ${words.one}s of ${organization.name || 'your organization'}.`}</p>
 
       <div aria-live="polite">
         {state.status === 'loading' ? <Loading /> : null}
 
         {state.status === 'error' ? (
-          <ErrorNotice message={messageForWorkspacesLoadError(state.error)}>
+          <ErrorNotice message={messageForWorkspacesLoadError(state.error, words.one)}>
             <button className="button" type="button" onClick={reload}>
               Try again
             </button>

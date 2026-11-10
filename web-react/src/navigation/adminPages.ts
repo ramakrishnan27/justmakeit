@@ -22,4 +22,16 @@ export const adminPages: readonly AdminPageDefinition[] = [
     title: 'Dashboard',
     Component: lazy(() => import('@/features/admin/AdminDashboardPage')),
   },
+  {
+    key: 'users',
+    path: '/admin/users',
+    title: 'Users',
+    Component: lazy(() => import('@/features/admin/UsersPage')),
+  },
+  {
+    key: 'channels',
+    path: '/admin/channels',
+    title: 'Channels',
+    Component: lazy(() => import('@/features/admin/ChannelsPage')),
+  },
 ];

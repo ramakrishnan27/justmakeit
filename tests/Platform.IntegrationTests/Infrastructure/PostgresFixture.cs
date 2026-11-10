@@ -1,47 +1,36 @@
 using Npgsql;
 using Platform.Helpers.Utilities;
-using Testcontainers.PostgreSql;
 
 namespace Platform.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// One PostgreSQL 16 container for the whole test run. Each test class asks it for its own database,
-/// so classes never share tables or rows. Credentials are random per run; nothing is stored.
+/// The PostgreSQL server of the database tests. The tests do not start one: it is the server named by
+/// <see cref="ExternalServerVariable"/>, a superuser connection string for a throwaway PostgreSQL 16 or later
+/// (never one that holds real data: the migration creates the cluster-wide role app_user and the tests create
+/// and drop databases). Each test class asks the fixture for its own database, so classes never share tables or
+/// rows. Credentials for the application role are random per run; nothing is stored.
 /// <para>
-/// Without Docker, set <see cref="ExternalServerVariable"/> to a superuser connection string for a
-/// throwaway PostgreSQL server (never one that holds real data: the migration creates the cluster-wide
-/// role app_user and the tests create and drop databases). The container is then not started.
+/// Without that variable every database test fails at once with a message that says so. To leave them out, run
+/// <c>dotnet test --filter "Category!=Database"</c>.
 /// </para>
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
     public const string ExternalServerVariable = "PLATFORM_TEST_POSTGRES";
 
-    private const string OwnerUser = "platform_owner";
-
-    private readonly string _ownerPassword = TokenGenerator.Create();
     private readonly string _appPassword = TokenGenerator.Create();
-    private readonly PostgreSqlContainer? _container;
-    private readonly string? _externalConnectionString = Environment.GetEnvironmentVariable(ExternalServerVariable);
+    private readonly string _adminConnectionString = Environment.GetEnvironmentVariable(ExternalServerVariable) ?? string.Empty;
 
-    public PostgresFixture()
-    {
-        if (!string.IsNullOrWhiteSpace(_externalConnectionString))
-        {
-            return;
-        }
+    private string AdminConnectionString => _adminConnectionString;
 
-        _container = new PostgreSqlBuilder("postgres:16-alpine")
-            .WithUsername(OwnerUser)
-            .WithPassword(_ownerPassword)
-            .Build();
-    }
+    public Task InitializeAsync() =>
+        string.IsNullOrWhiteSpace(_adminConnectionString)
+            ? Task.FromException(new InvalidOperationException(
+                $"The database tests need a PostgreSQL server: set {ExternalServerVariable} to a superuser connection string for a throwaway server " +
+                "(Host=...;Port=...;Username=...;Password=...;Database=postgres;Pooling=false). To run everything else, use: dotnet test --filter \"Category!=Database\""))
+            : Task.CompletedTask;
 
-    private string AdminConnectionString => _externalConnectionString ?? _container!.GetConnectionString();
-
-    public Task InitializeAsync() => _container?.StartAsync() ?? Task.CompletedTask;
-
-    public Task DisposeAsync() => _container?.DisposeAsync().AsTask() ?? Task.CompletedTask;
+    public Task DisposeAsync() => Task.CompletedTask;
 
     /// <summary>Creates a database, applies every migration to it as the owner, and returns it.</summary>
     public async Task<TestDatabase> CreateDatabaseAsync()

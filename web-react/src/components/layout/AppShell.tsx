@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Icon } from '@/components/icons/Icon';
+import { workspaceMenuLabel } from '@/lib/roles';
 import { useApp } from '@/navigation/AppContext';
 import { useSignedIn } from '@/session/SessionContext';
 import { AppHeader } from './AppHeader';
@@ -21,7 +22,8 @@ const desktopQuery = '(min-width: 720px)';
  * From 720 px it is a column beside the page and the button is gone.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { menu, kind } = useSignedIn();
+  const state = useSignedIn();
+  const { menu, kind } = state;
   const { pagePaths } = useApp();
   const { pathname } = useLocation();
   const wide = useMediaQuery(desktopQuery);
@@ -31,7 +33,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Only links to pages this app has: the server may list a page that is seeded but not built here yet, and its link would
   // open "not found".
-  const items = menu.filter((item) => pagePaths.includes(item.path));
+  // The workspaces link carries the word of the person's kind of organization (Products, Clients); words only.
+  const businessModel = state.kind === 'member' ? state.organization.businessModel : null;
+  const items = menu
+    .filter((item) => pagePaths.includes(item.path))
+    .map((item) => (item.pageKey === 'workspaces' ? { ...item, label: workspaceMenuLabel(businessModel, item.label) } : item));
 
   // The drawer is a drawer only on a narrow screen. On a wide one the sidebar is always there and nothing is inert.
   const drawerOpen = !wide && open;

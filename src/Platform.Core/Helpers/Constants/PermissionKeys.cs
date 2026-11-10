@@ -33,10 +33,62 @@ public static class PermissionKeys
     /// </summary>
     public const string MembersManage = "members.manage";
 
+    /// <summary>
+    /// See the channels (platforms) and which are enabled for the organization: the Platform page and <c>/v1/platforms</c>
+    /// (seeded by <c>012_member_platforms.sql</c>).
+    /// </summary>
+    public const string PlatformsView = "platforms.view";
+
+    /// <summary>
+    /// Open the Content Studio page (<c>/content-studio</c>). The four pages below are placeholders for features that are
+    /// not built yet: the menu item and the permission are real, the page says it is coming soon (seeded by
+    /// <c>013_member_studio_menu.sql</c>). The first segment of a key has no underscore, hence the one-word names.
+    /// </summary>
+    public const string ContentStudioView = "contentstudio.view";
+
+    /// <summary>Open the Media Library page (<c>/media-library</c>).</summary>
+    public const string MediaLibraryView = "medialibrary.view";
+
+    /// <summary>Open the AI Studio page (<c>/ai-studio</c>).</summary>
+    public const string AiStudioView = "aistudio.view";
+
+    /// <summary>Open the Calendar page (<c>/calendar</c>).</summary>
+    public const string CalendarView = "calendar.view";
+
+    /// <summary>
+    /// Create content in Content Studio: make, edit, duplicate and delete drafts, and save templates and tags
+    /// (<c>/v1/content</c>, seeded by <c>015_content_studio_posts.sql</c>). Held by every role that changes data.
+    /// </summary>
+    public const string ContentStudioCreate = "contentstudio.create";
+
+    /// <summary>
+    /// Publish content in Content Studio: schedule, publish now, unschedule, archive and restore, and delete content that is no
+    /// longer a draft (seeded by <c>015_content_studio_posts.sql</c>). Held by organization admins and marketing managers, and by
+    /// the content writer of an individual creator, who works alone. A content writer in a company or an agency creates drafts for
+    /// someone else to approve and publish.
+    /// </summary>
+    public const string ContentStudioPublish = "contentstudio.publish";
+
+    /// <summary>
+    /// Add to the Media Library: upload files, create folders and put files in them (<c>/v1/media</c>, seeded by
+    /// <c>016_media_library.sql</c>). Held by every role that changes data. Opening the page and reading needs
+    /// <see cref="MediaLibraryView"/>.
+    /// </summary>
+    public const string MediaLibraryCreate = "medialibrary.create";
+
+    /// <summary>
+    /// Delete files from the Media Library (seeded by <c>016_media_library.sql</c>). Held by organization admins and marketing
+    /// managers, and by the content writer of an individual creator, who works alone. A content writer in a company or an agency adds
+    /// files for others and does not take them away.
+    /// </summary>
+    public const string MediaLibraryDelete = "medialibrary.delete";
+
     /// <summary>Every key in the catalog. A test keeps this list, the constants above and the seeded table equal.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        DashboardView, WorkspacesView, WorkspacesCreate, DataRead, DataWrite, OrganizationManage, MembersManage
+        DashboardView, WorkspacesView, WorkspacesCreate, DataRead, DataWrite, OrganizationManage, MembersManage, PlatformsView,
+        ContentStudioView, MediaLibraryView, AiStudioView, CalendarView, ContentStudioCreate, ContentStudioPublish,
+        MediaLibraryCreate, MediaLibraryDelete
     ];
 
     /// <summary>

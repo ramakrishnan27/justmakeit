@@ -15,4 +15,13 @@ public interface ISiteAdminRepository
 
     /// <summary>One page of every agency, newest first. Same refusal rule as <see cref="GetOverviewAsync"/>.</summary>
     Task<SiteAgencyPage> ListAgenciesAsync(Guid userId, int page, int pageSize, CancellationToken cancellationToken);
+
+    /// <summary>One page of every membership on the platform (a person and their organization), newest first. Same refusal rule as <see cref="GetOverviewAsync"/>.</summary>
+    Task<SiteMemberPage> ListMembersAsync(Guid userId, int page, int pageSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deactivates or activates an organization; deactivating ends every member's sessions in the same transaction. True when the state
+    /// changed. Throws not found (<c>organization_not_found</c>) for an unknown organization.
+    /// </summary>
+    Task<bool> SetOrganizationActiveAsync(Guid userId, Guid agencyId, bool isActive, CancellationToken cancellationToken);
 }

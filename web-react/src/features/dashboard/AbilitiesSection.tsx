@@ -21,7 +21,7 @@ export function AbilitiesSection({ permissions, workspaceWord }: { permissions: 
   return (
     <Section title="What you can do">
       <ul className="ability-list">
-        <Ability text="View the workspaces and everything in them" allowed={can.read} />
+        <Ability text={`View the ${workspaceWord}s and everything in them`} allowed={can.read} />
         <Ability text="Create and change content" allowed={can.write} />
         <Ability text={`Add ${workspaceWord}s and manage the team`} allowed={can.manage} />
       </ul>

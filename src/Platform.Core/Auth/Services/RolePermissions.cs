@@ -6,7 +6,7 @@ namespace Platform.Auth.Services;
 
 /// <summary>
 /// What each role may do in a fresh installation: the factory defaults. <c>005_menus_permissions.sql</c>
-/// (and <c>007_team_members.sql</c> for its key) seeds exactly these as the grants of each business model and role, and a test compares the two. At run
+/// (and <c>007_team_members.sql</c>, <c>012_member_platforms.sql</c> and <c>013_member_studio_menu.sql</c> for their keys) seeds exactly these as the grants of each business model and role, and a test compares the two. At run
 /// time the Site admin's settings in the database decide (they reach the API as permissions in the access
 /// token), so this class is the reference the seeds and the tests are checked against, not the rule that
 /// is applied. <see cref="TryParse"/> is still how a role claim is read.
@@ -35,11 +35,30 @@ public static class RolePermissions
     /// </summary>
     public static bool GrantedByDefault(this OrganizationRole role, string permissionKey) => permissionKey switch
     {
-        PermissionKeys.DashboardView or PermissionKeys.WorkspacesView or PermissionKeys.DataRead => role.CanRead(),
-        PermissionKeys.DataWrite => role.CanWrite(),
+        // Every role opens these pages by default; the Site admin can take any of them away per role.
+        PermissionKeys.DashboardView or PermissionKeys.WorkspacesView or PermissionKeys.DataRead or PermissionKeys.PlatformsView
+            or PermissionKeys.ContentStudioView or PermissionKeys.MediaLibraryView or PermissionKeys.AiStudioView
+            or PermissionKeys.CalendarView => role.CanRead(),
+        PermissionKeys.DataWrite or PermissionKeys.ContentStudioCreate or PermissionKeys.MediaLibraryCreate => role.CanWrite(),
+        // Publishing and deleting media are the defaults that depend on the business model (see the overload below). Here: held in
+        // EVERY business model that has the role, so a content writer, who holds them only in a creator's organization, does not.
+        PermissionKeys.ContentStudioPublish or PermissionKeys.MediaLibraryDelete =>
+            role is OrganizationRole.OrganizationAdmin or OrganizationRole.MarketingManager,
         PermissionKeys.WorkspacesCreate or PermissionKeys.OrganizationManage or PermissionKeys.MembersManage => role.CanManage(),
         _ => throw new ArgumentOutOfRangeException(nameof(permissionKey), permissionKey, "Unknown permission.")
     };
+
+    /// <summary>
+    /// The factory default of one (business model, role) slot, which is what the database is seeded with and what the Site admin
+    /// edits. Equal to <see cref="GrantedByDefault(OrganizationRole, string)"/> except where a default depends on the model:
+    /// <c>contentstudio.publish</c> and <c>medialibrary.delete</c> are also held by the content writer of an individual creator, who
+    /// works alone and so publishes their own content and manages their own files, while a content writer in a company or an agency
+    /// submits content for others to publish and adds files for others to keep.
+    /// </summary>
+    public static bool GrantedByDefault(this OrganizationRole role, BusinessModel model, string permissionKey) =>
+        permissionKey is PermissionKeys.ContentStudioPublish or PermissionKeys.MediaLibraryDelete
+            && model == BusinessModel.Creator && role == OrganizationRole.ContentWriter
+        || role.GrantedByDefault(permissionKey);
 
     /// <summary>
     /// Reads a role from its stored lower-case name, such as the token's role claim. Strict on purpose:

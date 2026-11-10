@@ -27,7 +27,7 @@ export function AddWorkspaceForm({ word, onAdded }: { word: string; onAdded: () 
       await api.request('/v1/workspaces', { method: 'POST', body: { name: name.trim() } });
       onAdded();
     } catch (failure) {
-      setError(messageForWorkspaceError(failure));
+      setError(messageForWorkspaceError(failure, word));
       setSubmitting(false);
     }
   }

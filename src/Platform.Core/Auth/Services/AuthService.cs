@@ -115,19 +115,21 @@ public sealed class AuthService(
             throw new ForbiddenException("This account does not belong to any organization.", "no_agency");
         }
 
-        // A deactivated membership cannot be signed in to. This is said only now, after the password (or the Google
-        // sign-in) has been verified, so it tells nobody that an address is a member.
-        var usable = userMemberships.Where(m => m.IsActive).ToList();
+        // A deactivated membership, or a membership of a deactivated organization, cannot be signed in to. This is said only
+        // now, after the password (or the Google sign-in) has been verified, so it tells nobody that an address is a member.
+        // A person who also belongs to an organization that is active signs in to that one.
+        var usable = userMemberships.Where(m => m.CanSignIn).ToList();
         if (usable.Count == 0)
         {
-            throw Deactivated();
+            // The account is the problem when some organization of theirs is active; otherwise it is the organization.
+            throw userMemberships.Any(m => m.OrganizationIsActive) ? Deactivated() : OrganizationDeactivated();
         }
 
         // The list is ordered most recently used first, so the first entry is the default.
         var membership = requestedAgencyId is { } requested
             ? usable.FirstOrDefault(m => m.AgencyId == requested)
-              ?? (userMemberships.Any(m => m.AgencyId == requested)
-                  ? throw Deactivated()
+              ?? (userMemberships.FirstOrDefault(m => m.AgencyId == requested) is { } refused
+                  ? throw RefusalFor(refused)
                   : throw new ForbiddenException("You are not a member of that organization.", "not_a_member"))
             : usable[0];
 
@@ -148,9 +150,9 @@ public sealed class AuthService(
 
         var membership = await memberships.FindAsync(userId, targetAgencyId, cancellationToken)
                          ?? throw new ForbiddenException("You are not a member of that organization.", "not_a_member");
-        if (!membership.IsActive)
+        if (!membership.CanSignIn)
         {
-            throw Deactivated();
+            throw RefusalFor(membership);
         }
 
         var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
@@ -169,10 +171,11 @@ public sealed class AuthService(
 
         var user = await accounts.GetUserAsync(userId, cancellationToken)
                    ?? throw new UnauthorizedException("The account no longer exists.", "unknown_user");
-        var all = (await memberships.ListForUserAsync(userId, cancellationToken)).Where(m => m.IsActive).ToList();
+        var all = (await memberships.ListForUserAsync(userId, cancellationToken)).Where(m => m.CanSignIn).ToList();
 
-        // The token can outlive a membership by up to its lifetime; the database has the final say. A deactivated one
-        // has ended too (its sessions are voided when it is deactivated; this covers a token issued in the same second).
+        // The token can outlive a membership by up to its lifetime; the database has the final say. A deactivated one, or one
+        // of a deactivated organization, has ended too (its sessions are voided when it is deactivated; this covers a token
+        // issued in the same second).
         var current = all.FirstOrDefault(m => m.AgencyId == agencyId)
                       ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
         var agency = await agencies.GetAsync(agencyId, userId, cancellationToken)
@@ -216,9 +219,9 @@ public sealed class AuthService(
         // person signed out of this session as well, with nothing to show for it.
         var membership = await memberships.FindAsync(userId, agencyId, cancellationToken)
                          ?? throw new UnauthorizedException("You are no longer a member of this organization.", "membership_ended");
-        if (!membership.IsActive)
+        if (!membership.CanSignIn)
         {
-            throw Deactivated();
+            throw RefusalFor(membership);
         }
 
         var grants = await permissions.GetGrantsAsync(membership.BusinessModel, membership.Role, cancellationToken);
@@ -284,6 +287,13 @@ public sealed class AuthService(
 
     private static ForbiddenException Deactivated() =>
         new("Your account has been deactivated. Ask your organization admin to activate it.", "account_deactivated");
+
+    private static ForbiddenException OrganizationDeactivated() =>
+        new("Your organization has been deactivated. Contact the platform administrator.", "organization_deactivated");
+
+    // Why this membership cannot be signed in to: the organization first (it takes everybody in it), then the person.
+    private static ForbiddenException RefusalFor(MembershipRecord membership) =>
+        membership.OrganizationIsActive ? Deactivated() : OrganizationDeactivated();
 
     // The one place a member's access token is made: register, login, switch-agency, an accepted invitation and Google all
     // end here, each with the permissions its caller read for the member's role. Nothing is stored:

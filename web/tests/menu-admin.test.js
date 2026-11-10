@@ -124,7 +124,7 @@ describe('validateMenuItem', () => {
     for (const icon of iconNames) {
       assert.equal(validateMenuItem({ ...good, icon }), null, icon);
     }
-    for (const icon of [undefined, null, '', 'sparkles', 'Home', 'home ', '<svg>']) {
+    for (const icon of [undefined, null, '', 'rocket', 'Home', 'home ', '<svg>']) {
       assert.equal(validateMenuItem({ ...good, icon })?.field, 'icon', String(icon));
     }
   });

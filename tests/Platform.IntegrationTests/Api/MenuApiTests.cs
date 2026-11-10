@@ -16,7 +16,7 @@ namespace Platform.IntegrationTests.Api;
 /// from memory: the repositories are wrapped in counters, and many requests must cost a handful of reads, not one each.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private readonly ReadCounter _reads = new();
@@ -34,10 +34,10 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         [.. menu.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("label").GetString()!)];
 
     [Theory]
-    [InlineData("company", "/dashboard,/workspaces,/team")]
-    [InlineData("agency", "/dashboard,/workspaces,/team")]
-    [InlineData("creator", "/dashboard,/workspaces")] // a creator works alone: no team permission, so no Team page
-    public async Task TheFounder_SeesTheDashboardAndTheWorkspacesPage_AndTheTeamPageWhenTheyHoldThePermission(string businessModel, string paths)
+    [InlineData("company", "/dashboard,/content-studio,/media-library,/ai-studio,/calendar,/workspaces,/platforms,/team")]
+    [InlineData("agency", "/dashboard,/content-studio,/media-library,/ai-studio,/calendar,/workspaces,/platforms,/team")]
+    [InlineData("creator", "/dashboard,/content-studio,/media-library,/ai-studio,/calendar,/workspaces,/platforms")] // a creator works alone: no team permission, so no Team page
+    public async Task TheFounder_SeesTheDashboardTheStudioPagesAndTheWorkspacesPage_AndTheTeamPageWhenTheyHoldThePermission(string businessModel, string paths)
     {
         var founder = await Host.RegisterAsync(businessModel: businessModel);
 
@@ -63,8 +63,8 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
         var adminMenu = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/menu", admin.AccessToken));
         var writerMenu = await ApiTestHost.ReadJsonAsync(await Host.GetAsync("/v1/menu", writerCookie));
 
-        Assert.Equal(["Dashboard", "Workspaces", "Team"], LabelsIn(adminMenu));
-        Assert.Equal(["Dashboard", "Workspaces"], LabelsIn(writerMenu));
+        Assert.Equal(["Dashboard", "Content Studio", "Media Library", "AI Studio", "Calendar", "Workspaces", "Platform", "Team"], LabelsIn(adminMenu));
+        Assert.Equal(["Dashboard", "Content Studio", "Media Library", "AI Studio", "Calendar", "Workspaces", "Platform"], LabelsIn(writerMenu));
     }
 
     private async Task<(string Token, Guid InvitationId)> InviteAsync(Session admin, string email, string role)
@@ -119,7 +119,7 @@ public sealed class MenuApiTests(PostgresFixture postgres) : AuthApiTestBase(pos
             var response = await Host.GetAsync("/v1/menu", admin.AccessToken);
 
             AssertStatus(HttpStatusCode.OK, response);
-            Assert.Equal(["Dashboard", "Workspaces", "Team"], LabelsIn(await ApiTestHost.ReadJsonAsync(response)));
+            Assert.Equal(["Dashboard", "Content Studio", "Media Library", "AI Studio", "Calendar", "Workspaces", "Platform", "Team"], LabelsIn(await ApiTestHost.ReadJsonAsync(response)));
         }
         finally
         {

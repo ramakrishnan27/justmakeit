@@ -18,6 +18,22 @@ describe('api client', () => {
     expect(Object.keys(call!.headers).map((name) => name.toLowerCase())).not.toContain('authorization');
   });
 
+  it('sends a form as the form it is, with no JSON content type, so the browser can write the boundary', async () => {
+    const fetchFn = routedFetch({ 'POST /v1/upload': jsonResponse(201, { ok: true }) });
+    const api = createApiClient({ fetchFn });
+    const form = new FormData();
+    form.set('name', 'Telegram');
+    form.set('icon', new File([new Uint8Array([1, 2, 3])], 'icon.png', { type: 'image/png' }));
+
+    await api.request('/v1/upload', { method: 'POST', body: form });
+
+    const [call] = fetchFn.calls;
+    expect(call!.init.body).toBe(form);
+    expect(Object.keys(call!.headers).map((name) => name.toLowerCase())).not.toContain('content-type');
+    expect(call!.headers.Accept).toBe('application/json');
+    expect(call!.init.credentials).toBe('same-origin');
+  });
+
   it('sends the cookie only to its own origin', async () => {
     const fetchFn = routedFetch({ 'GET /v1/thing': jsonResponse(200, {}) });
 

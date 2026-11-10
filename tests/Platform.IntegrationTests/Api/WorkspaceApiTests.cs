@@ -7,7 +7,7 @@ namespace Platform.IntegrationTests.Api;
 
 /// <summary>The workspace endpoints end to end: the role rules, and agencies never seeing each other's workspaces.</summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class WorkspaceApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private static string[] NamesIn(System.Text.Json.JsonElement list) =>

@@ -57,3 +57,18 @@ export function parseMenu(body: unknown): Menu {
     permissions: Array.isArray(permissions) ? permissions.filter((permission): permission is string => typeof permission === 'string') : [],
   };
 }
+
+/**
+ * Whether the menu item at `path` is the one for the page open at `pathname`. The page itself, or a page below it (the Content Studio
+ * editor at /content-studio/new belongs to the Content Studio item), unless another item of the menu claims that address more closely
+ * (the Site admin's /admin/users is the Users item, not Dashboard at /admin).
+ */
+export function isCurrentPath(path: string, pathname: string, itemPaths: readonly string[]): boolean {
+  if (pathname === path) {
+    return true;
+  }
+  if (!pathname.startsWith(`${path}/`)) {
+    return false;
+  }
+  return !itemPaths.some((other) => other.length > path.length && (pathname === other || pathname.startsWith(`${other}/`)));
+}

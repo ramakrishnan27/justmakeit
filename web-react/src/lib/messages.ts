@@ -42,6 +42,9 @@ export function messageForSignInError(error: unknown): string {
     if (error.code === 'account_deactivated') {
       return 'Your account has been deactivated. Ask your organization admin to activate it.';
     }
+    if (error.code === 'organization_deactivated') {
+      return 'Your organization has been deactivated. Contact the platform administrator.';
+    }
     if (error.status === 401) {
       return 'Email or password is incorrect.';
     }
@@ -63,6 +66,8 @@ const googleErrors: Record<string, string> = {
   google_email_taken: 'That email address already has an account. Sign in with your email and password instead.',
   google_no_account: 'There is no account for that Google address yet. Create one first.',
   google_no_organization: 'That account does not belong to an organization yet.',
+  google_account_deactivated: 'Your account has been deactivated. Ask your organization admin to activate it.',
+  google_organization_deactivated: 'Your organization has been deactivated. Contact the platform administrator.',
 };
 
 /** What to tell the person when Google sent them back with an error code. Null when there is no error to show. */
@@ -133,8 +138,8 @@ export function messageForRegisterError(error: unknown): string {
   return offline;
 }
 
-/** What to show when the Site admin dashboard could not be loaded. */
-export function messageForSiteLoadError(error: unknown): string {
+/** What to show when something the Site admin asked for could not be loaded: the dashboard, or a list on the Users page. */
+export function messageForSiteLoadError(error: unknown, subject = 'The dashboard'): string {
   if (error instanceof ApiError) {
     if (error.status === 429) {
       return tooMany;
@@ -142,24 +147,38 @@ export function messageForSiteLoadError(error: unknown): string {
     if (error.status === 403) {
       return 'This account is no longer a site admin.';
     }
-    return 'The dashboard could not be loaded.';
+    return `${subject} could not be loaded.`;
   }
   return offline;
 }
 
 /** What to show when the workspaces could not be loaded. */
-export function messageForWorkspacesLoadError(error: unknown): string {
+export function messageForWorkspacesLoadError(error: unknown, word = 'workspace'): string {
   if (error instanceof ApiError) {
-    return error.status === 429 ? tooMany : 'Your workspaces could not be loaded.';
+    return error.status === 429 ? tooMany : `Your ${word}s could not be loaded.`;
+  }
+  return offline;
+}
+
+/** What to show when the platforms could not be loaded. */
+export function messageForPlatformsLoadError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'Your role cannot see the platforms.';
+    }
+    return 'The platforms could not be loaded.';
   }
   return offline;
 }
 
 /** What to tell an organization admin when adding a workspace failed. */
-export function messageForWorkspaceError(error: unknown): string {
+export function messageForWorkspaceError(error: unknown, word = 'workspace'): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return 'Your role cannot add workspaces.';
+      return `Your role cannot add ${word}s.`;
     }
     if (error.status === 409) {
       return 'This kind of organization has one workspace.';
@@ -172,7 +191,7 @@ export function messageForWorkspaceError(error: unknown): string {
       return field;
     }
   }
-  return 'The workspace could not be added. Try again in a moment.';
+  return `The ${word} could not be added. Try again in a moment.`;
 }
 
 /** What to show when the team could not be loaded. */
@@ -368,4 +387,111 @@ export function messageForAcceptError(error: unknown): string {
     return firstFieldError(error) ?? 'The invitation could not be accepted. Try again in a moment.';
   }
   return offline;
+}
+
+/** What to show when the list of content, or one post, could not be loaded. */
+export function messageForContentLoadError(error: unknown, subject = 'The content'): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'Your role cannot see content.';
+    }
+    if (error.status === 404) {
+      return 'That post was not found. It may have been deleted.';
+    }
+    return `${subject} could not be loaded.`;
+  }
+  return offline;
+}
+
+const contentCodes: Record<string, string> = {
+  content_changed: 'This post was changed after you opened it. Reload it to see the latest version.',
+  post_publishing: 'This post is being published, so it cannot be changed now.',
+  post_not_editable: 'A post that has been published or is being published cannot be edited. Duplicate it to make changes.',
+  post_not_deletable: 'A published post cannot be deleted. Archive it instead.',
+  post_not_found: 'That post was not found. It may have been deleted.',
+  invalid_transition: 'This post changed while you were working on it. Reload it and try again.',
+  platform_not_enabled: 'One of the platforms is not enabled for your organization.',
+  campaign_not_available: 'Campaigns are not available yet.',
+  workspace_not_found: 'That workspace was not found.',
+  template_exists: 'There is already a template with that name.',
+  template_not_found: 'That template was not found. It may have been deleted.',
+  tag_exists: 'There is already a tag with that name.',
+  media_not_available: 'The Media Library is not available.',
+  media_asset_not_found: 'A file you chose is no longer in the Media Library. Take it off the post and choose again.',
+  media_workspace_mismatch: 'Files must come from the same workspace as the post.',
+  media_type_not_allowed: 'Only images and videos can be added to a post.',
+};
+
+/** What to tell a person when saving, scheduling or changing a post failed. Names the problem; never shows more than the API did. */
+export function messageForContentError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code !== null && Object.hasOwn(contentCodes, error.code)) {
+      return contentCodes[error.code] ?? 'The request failed.';
+    }
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'Your role is not allowed to do that.';
+    }
+    return firstFieldError(error) ?? 'That did not work. Try again in a moment.';
+  }
+  return offline;
+}
+
+/** The problems of a 400 answer, field by field, for showing next to the fields. Empty for any other error. */
+export function contentFieldProblems(error: unknown): Record<string, string[]> {
+  return error instanceof ApiError && error.status === 400 && error.errors ? error.errors : {};
+}
+
+/** What to show when the Media Library, or a part of it (the folders, the settings), could not be loaded. */
+export function messageForMediaLoadError(error: unknown, subject = 'The media'): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'Your role cannot see the Media Library.';
+    }
+    return `${subject} could not be loaded.`;
+  }
+  return offline;
+}
+
+const mediaCodes: Record<string, string> = {
+  folder_exists: 'There is already a folder with that name.',
+  folder_not_found: 'That folder was not found. It may have been deleted.',
+  asset_not_found: 'That file was not found. It may have been deleted.',
+  asset_file_missing: 'The file itself is missing from storage.',
+  asset_in_use: 'This file is used by content, so it cannot be deleted. Remove it from there first.',
+  workspace_not_found: 'That workspace was not found.',
+  workspace_mismatch: 'Files can only be put in a folder of their own workspace.',
+};
+
+/** What to tell a person when an upload, a move, a copy, a delete or a new folder failed. Names the problem; never shows more than the API did. */
+export function messageForMediaError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code !== null && Object.hasOwn(mediaCodes, error.code)) {
+      return mediaCodes[error.code] ?? 'The request failed.';
+    }
+    if (error.status === 429) {
+      return tooMany;
+    }
+    if (error.status === 403) {
+      return 'Your role is not allowed to do that.';
+    }
+    if (error.status === 413) {
+      return 'This file is larger than the server accepts.';
+    }
+    return firstFieldError(error) ?? 'That did not work. Try again in a moment.';
+  }
+  return offline;
+}
+
+/** The problems of a 400 answer, field by field, for showing next to the fields. Empty for any other error. */
+export function mediaFieldProblems(error: unknown): Record<string, string[]> {
+  return error instanceof ApiError && error.status === 400 && error.errors ? error.errors : {};
 }

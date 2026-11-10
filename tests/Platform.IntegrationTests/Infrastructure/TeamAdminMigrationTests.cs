@@ -92,8 +92,8 @@ public abstract partial class TeamMigrationTestsBase
         var unnamed = await InviteNamedAsync(org, NewEmail(), "contentwriter", null); // an invitation from before names were asked for
 
         await using var nobody = await Db.OpenAppAsync();
-        Assert.Equal("Dev Kumar", await nobody.ExecuteScalarAsync<string?>("SELECT full_name FROM invitation_find_v2(@hash)", new { hash = named }));
-        Assert.Null(await nobody.ExecuteScalarAsync<string?>("SELECT full_name FROM invitation_find_v2(@hash)", new { hash = unnamed }));
+        Assert.Equal("Dev Kumar", await nobody.ExecuteScalarAsync<string?>("SELECT full_name FROM invitation_find_v3(@hash)", new { hash = named }));
+        Assert.Null(await nobody.ExecuteScalarAsync<string?>("SELECT full_name FROM invitation_find_v3(@hash)", new { hash = unnamed }));
 
         await AssertRefusedAsync(
             () => InviteNamedAsync(org, NewEmail(), "contentwriter", "   "), PostgresErrorCodes.CheckViolation, "ck_member_invitations_name");
@@ -121,7 +121,7 @@ public abstract partial class TeamMigrationTestsBase
         await using var nobody = await Db.OpenAppAsync();
         foreach (var hash in new[] { used, revoked, expired, "not-a-hash" })
         {
-            Assert.Empty(await nobody.QueryAsync("SELECT * FROM invitation_find_v2(@hash)", new { hash }));
+            Assert.Empty(await nobody.QueryAsync("SELECT * FROM invitation_find_v3(@hash)", new { hash }));
         }
     }
 
@@ -344,7 +344,7 @@ public abstract partial class TeamMigrationTestsBase
 
         // The link no longer works, and the person no longer waits in the list of invitations.
         await using var nobody = await Db.OpenAppAsync();
-        Assert.Empty(await nobody.QueryAsync("SELECT * FROM invitation_find_v2(@hash)", new { hash }));
+        Assert.Empty(await nobody.QueryAsync("SELECT * FROM invitation_find_v3(@hash)", new { hash }));
         await AssertRuleAsync(() => AcceptAsync(hash), "invitation_invalid");
         await using var admin2 = await AsAsync(org.AgencyId, org.AdminId);
         Assert.Equal(0, await admin2.ExecuteScalarAsync<int>("SELECT count(*) FROM member_invitations WHERE accepted_at IS NULL AND revoked_at IS NULL"));

@@ -9,7 +9,7 @@ namespace Platform.IntegrationTests.Auth;
 
 /// <summary>Membership and agency queries as app_user: a user sees their own memberships and nothing else.</summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class MembershipRepositoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly DateTimeOffset Noon = new(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);

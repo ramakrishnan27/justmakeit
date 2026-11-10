@@ -36,12 +36,21 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
     [InlineData("/admin/login")]
     [InlineData("/admin/menus")]
     [InlineData("/admin/permissions")]
+    [InlineData("/admin/users")]
+    [InlineData("/admin/channels")]
     [InlineData("/admin/anything/deeper/than/that")]
     [InlineData("/login")]
     [InlineData("/register")]
     [InlineData("/dashboard")]
     [InlineData("/dashboard/")]
     [InlineData("/workspaces")]
+    [InlineData("/platforms")]
+    [InlineData("/content-studio")]
+    [InlineData("/content-studio/new")]
+    [InlineData("/content-studio/0b6c1a0e-7a9e-4d0c-9d0a-3d6f4b7d8f11")]
+    [InlineData("/media-library")]
+    [InlineData("/ai-studio")]
+    [InlineData("/calendar")]
     [InlineData("/workspaces/")]
     [InlineData("/team")]
     [InlineData("/account")]
@@ -194,7 +203,7 @@ public sealed partial class WebClientHostingTests : IAsyncLifetime
         // The fallback authorization policy must not close the page that lets a person sign in.
         foreach (var path in new[]
                  {
-                     "/", "/admin", "/admin/login", "/admin/menus", "/admin/permissions", "/login", "/register", "/dashboard", "/workspaces",
+                     "/", "/admin", "/admin/login", "/admin/menus", "/admin/permissions", "/login", "/register", "/dashboard", "/workspaces", "/platforms", "/content-studio", "/media-library", "/ai-studio", "/calendar",
                      "/team", "/accept-invite", "/account", "/css/app.css", "/js/main.js", "/js/components/app-shell.js",
                      "/js/pages/admin-login.js", "/js/pages/member-login.js", "/js/pages/member-register.js"
                  })

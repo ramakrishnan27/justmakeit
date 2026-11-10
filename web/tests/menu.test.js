@@ -86,7 +86,7 @@ describe('parseMenu', () => {
   });
 
   it('keeps an icon name it does not know: drawing it is the icon module’s job', () => {
-    assert.equal(parseMenu({ items: [{ ...dashboard, icon: 'sparkles' }], permissions: [] }).items[0].icon, 'sparkles');
+    assert.equal(parseMenu({ items: [{ ...dashboard, icon: 'rocket' }], permissions: [] }).items[0].icon, 'rocket');
   });
 
   it('keeps only the permissions that are text', () => {

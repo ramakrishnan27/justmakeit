@@ -5,7 +5,7 @@ using Platform.Infrastructure.Data;
 namespace Platform.IntegrationTests.Infrastructure;
 
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class NpgsqlConnectionFactoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

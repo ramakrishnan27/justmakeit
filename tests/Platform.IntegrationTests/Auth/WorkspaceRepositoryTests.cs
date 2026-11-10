@@ -11,7 +11,7 @@ namespace Platform.IntegrationTests.Auth;
 /// repository or through plain SQL that forgets to filter.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class WorkspaceRepositoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly DateTimeOffset Noon = new(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);

@@ -21,7 +21,7 @@ namespace Platform.IntegrationTests.SiteAdmin;
 /// missing, the functions would not fail, they would just report zeros. These tests catch that.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class SiteAdminWithLimitedOwnerTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private const string Password = "a long enough password";
@@ -88,6 +88,35 @@ public sealed class SiteAdminWithLimitedOwnerTests(PostgresFixture postgres) : I
             Assert.Equal(1, a.MemberCount);
             Assert.Equal(1, a.WorkspaceCount);
         });
+    }
+
+    [Fact]
+    public async Task TheMemberList_StillSeesEveryRow_BecauseOfTheOwnerPolicies()
+    {
+        // Without the owner policies on users, agency_members and agencies the function would not fail, it would list nobody.
+        await RegisterAgencyAsync("one@example.com", "Agency One", "Workspace one");
+        await RegisterAgencyAsync("two@example.com", "Agency Two", "Workspace two");
+        await RegisterAgencyAsync("three@example.com", "Agency Three", "Workspace three");
+        await Bootstrapper("root@example.com", Password).EnsureAsync(CancellationToken.None);
+        var admin = await QueryOwnerAsync<Guid>("SELECT user_id FROM site_admins");
+
+        var page = await new SiteAdminRepository(_db.CreateFactory()).ListMembersAsync(admin, 1, 20, CancellationToken.None);
+
+        Assert.Equal(3, page.TotalCount); // the site admin has no membership, so is not listed
+        Assert.Equal(["one@example.com", "three@example.com", "two@example.com"], page.Items.Select(m => m.Email).Order());
+        Assert.Equal(["Agency One", "Agency Three", "Agency Two"], page.Items.Select(m => m.AgencyName).Order());
+        Assert.All(page.Items, m => Assert.Equal(OrganizationRole.OrganizationAdmin, m.Role));
+        Assert.All(page.Items, m => Assert.True(m.IsActive));
+    }
+
+    [Fact]
+    public async Task AnAgencyOwner_IsStillRefused_ByTheMemberList()
+    {
+        await RegisterAgencyAsync("owner@example.com", "Agency", "Workspace");
+        var ownerId = await QueryOwnerAsync<Guid>("SELECT id FROM users WHERE email = 'owner@example.com'");
+
+        await Assert.ThrowsAsync<Platform.Helpers.Exceptions.ForbiddenException>(
+            () => new SiteAdminRepository(_db.CreateFactory()).ListMembersAsync(ownerId, 1, 20, CancellationToken.None));
     }
 
     [Fact]

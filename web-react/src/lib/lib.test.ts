@@ -14,7 +14,7 @@ import {
   validateSignIn,
   type RegistrationForm,
 } from './messages';
-import { abilities, allowsSeveralWorkspaces, businessModels, organizationNameLabel, responsibilities, roleTitle, upcomingAreas, workspaceWords } from './roles';
+import { abilities, allowsSeveralWorkspaces, businessModels, organizationNameLabel, responsibilities, roleTitle, upcomingAreas, workspaceMenuLabel, workspaceWords } from './roles';
 
 describe('format', () => {
   it('formats numbers, and shows a dash for what is not one', () => {
@@ -59,7 +59,7 @@ describe('roles', () => {
   });
 
   it('says what a role is for in each kind of organization, and nothing for a pair that does not exist', () => {
-    expect(responsibilities('company', 'organizationadmin')).toMatch(/company workspace/);
+    expect(responsibilities('company', 'organizationadmin')).toMatch(/company products/);
     expect(responsibilities('agency', 'clientmanager')).toMatch(/client/);
     expect(responsibilities('creator', 'contentwriter')).toMatch(/personal publishing/);
     expect(responsibilities('creator', 'clientmanager')).toBeNull();
@@ -76,13 +76,22 @@ describe('roles', () => {
   });
 
   it('words workspaces for the kind of organization', () => {
-    expect(workspaceWords('agency')).toEqual({ one: 'client workspace', many: 'Client workspaces' });
-    expect(workspaceWords('creator').many).toBe('Your workspace');
-    expect(workspaceWords('company').one).toBe('workspace');
+    expect(workspaceWords('agency')).toEqual({ one: 'client', many: 'Clients' });
+    expect(workspaceWords('company')).toEqual({ one: 'product', many: 'Products' });
+    expect(workspaceWords('creator')).toEqual({ one: 'workspace', many: 'Your workspace' });
+    expect(workspaceWords(null)).toEqual({ one: 'workspace', many: 'Workspaces' });
     expect(allowsSeveralWorkspaces('creator')).toBe(false);
     expect(allowsSeveralWorkspaces('agency')).toBe(true);
     expect(organizationNameLabel('agency')).toBe('Agency name');
     expect(organizationNameLabel('')).toBe('Organization name');
+  });
+
+  it('words the sidebar link by kind of organization, and keeps a label the Site admin renamed', () => {
+    expect(workspaceMenuLabel('company', 'Workspaces')).toBe('Products');
+    expect(workspaceMenuLabel('agency', 'Workspaces')).toBe('Clients');
+    expect(workspaceMenuLabel('creator', 'Workspaces')).toBe('Workspaces');
+    expect(workspaceMenuLabel('company', 'Brands')).toBe('Brands');
+    expect(workspaceMenuLabel(null, 'Workspaces')).toBe('Workspaces');
   });
 
   it('reads the three baseline abilities from the permission list, and allows nothing without one', () => {

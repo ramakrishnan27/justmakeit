@@ -91,6 +91,53 @@ export interface SiteOrganization {
   createdAt: string;
   members: number;
   workspaces: number;
+  /** False when the Site admin has deactivated the organization: nobody in it can sign in. */
+  isActive: boolean;
+  /** How many channels are enabled for the organization. */
+  channels: number;
+}
+
+/** One person as the Site admin sees them, with the organization they belong to. A person in two organizations is two of these. */
+export interface SiteMember {
+  userId: string;
+  fullName: string;
+  email: string;
+  /** The organization (the server's code calls it an agency). */
+  agencyId: string;
+  agencyName: string;
+  businessModel: BusinessModel;
+  role: OrganizationRole;
+  /** False when an organization admin has deactivated the person: they keep their place but cannot sign in. */
+  isActive: boolean;
+  /** When the person was added to the organization. */
+  joinedAt: string;
+}
+
+// --- Channels, managed by the Site admin (SiteChannelsController and SiteOrganizationsController on the server) ---
+
+/** A channel as the Site admin's list shows it. Its icon is a built-in glyph (`iconKey`) or an uploaded image (`hasIconImage`). */
+export interface SiteChannel {
+  id: string;
+  name: string;
+  description: string;
+  /** The built-in icon the app draws, or null when the channel has an uploaded image. */
+  iconKey: string | null;
+  hasIconImage: boolean;
+  /** Who created it, or null for one of the built-in channels. */
+  createdByName: string | null;
+  createdAt: string;
+  /** How many organizations have the channel enabled. */
+  organizationCount: number;
+}
+
+/** A channel as one organization sees it: whether the Site admin has turned it on for them. */
+export interface OrganizationChannel {
+  id: string;
+  name: string;
+  description: string;
+  iconKey: string | null;
+  hasIconImage: boolean;
+  isEnabled: boolean;
 }
 
 export interface PagedResult<T> {

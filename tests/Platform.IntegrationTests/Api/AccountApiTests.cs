@@ -11,7 +11,7 @@ namespace Platform.IntegrationTests.Api;
 /// <c>app_user</c>, as in production.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class AccountApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private const string NewPassword = "a brand new password 1";

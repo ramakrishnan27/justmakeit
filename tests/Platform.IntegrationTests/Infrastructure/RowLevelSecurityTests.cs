@@ -8,7 +8,7 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// (a superuser in the test container); everything under test runs as app_user, like the API.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class RowLevelSecurityTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

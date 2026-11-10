@@ -15,6 +15,14 @@ export const sessionEndsAt = '2030-01-15T09:30:00Z';
 export const dashboardItem = { id: 'm1', pageKey: 'dashboard', label: 'Dashboard', icon: 'home', path: '/dashboard' };
 export const workspacesItem = { id: 'm2', pageKey: 'workspaces', label: 'Workspaces', icon: 'folder', path: '/workspaces' };
 
+export const platformsItem = { id: 'm4', pageKey: 'platforms', label: 'Platform', icon: 'list', path: '/platforms' };
+
+/** The four placeholder pages, as the server puts them in the sidebar (013_member_studio_menu.sql). */
+export const contentStudioItem = { id: 'm5', pageKey: 'content-studio', label: 'Content Studio', icon: 'edit', path: '/content-studio' };
+export const mediaLibraryItem = { id: 'm6', pageKey: 'media-library', label: 'Media Library', icon: 'image', path: '/media-library' };
+export const aiStudioItem = { id: 'm7', pageKey: 'ai-studio', label: 'AI Studio', icon: 'sparkles', path: '/ai-studio' };
+export const calendarItem = { id: 'm8', pageKey: 'calendar', label: 'Calendar', icon: 'calendar', path: '/calendar' };
+
 export const teamItem = { id: 'm3', pageKey: 'team', label: 'Team', icon: 'users', path: '/team' };
 
 export interface MemberOptions {
@@ -68,8 +76,74 @@ export const adminDashboardItem = { id: 'a1', pageKey: 'dashboard', label: 'Dash
 export const overview = { agencies: 12, trialAgencies: 9, paidAgencies: 3, users: 40, workspaces: 25, memberships: 44 };
 
 export function organization(name: string, overrides: Record<string, unknown> = {}) {
-  return { id: `o-${name}`, name, businessModel: 'company', plan: 'trial', createdAt: '2026-03-05T10:30:00Z', members: 2, workspaces: 1, ...overrides };
+  return {
+    id: `o-${name}`,
+    name,
+    businessModel: 'company',
+    plan: 'trial',
+    createdAt: '2026-03-05T10:30:00Z',
+    members: 2,
+    workspaces: 1,
+    isActive: true,
+    channels: 0,
+    ...overrides,
+  };
 }
+
+/** One channel as the list of one organization's channels sends it. */
+export function organizationChannel(name: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `ch-${name.toLowerCase().replace(/\s+/g, '-')}`,
+    name,
+    description: '',
+    iconKey: 'broadcast',
+    hasIconImage: false,
+    isEnabled: false,
+    ...overrides,
+  };
+}
+
+/** One membership as the Site admin's member list sends it: a person and the organization they belong to. */
+export function siteMember(name: string, overrides: Record<string, unknown> = {}) {
+  return {
+    userId: `u-${name}`,
+    fullName: name,
+    email: `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+    agencyId: 'a-1',
+    agencyName: 'Northwind Foods',
+    businessModel: 'company',
+    role: 'marketingmanager',
+    isActive: true,
+    joinedAt: '2026-03-05T10:30:00Z',
+    ...overrides,
+  };
+}
+
+/** One channel as the Site admin's list sends it. A built-in one has no creator; pass `createdByName` for one an admin added. */
+export function siteChannel(name: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: `ch-${name.toLowerCase().replace(/\s+/g, '-')}`,
+    name,
+    description: '',
+    iconKey: 'broadcast',
+    hasIconImage: false,
+    createdByName: null,
+    createdAt: '2026-11-05T09:00:00Z',
+    organizationCount: 0,
+    ...overrides,
+  };
+}
+
+/** The seven channels a fresh installation has, as the server lists them. */
+export const builtInChannels = [
+  siteChannel('Instagram', { iconKey: 'instagram', description: 'Publish posts and stories to Instagram.' }),
+  siteChannel('Facebook', { iconKey: 'facebook', description: 'Publish posts to Facebook pages.' }),
+  siteChannel('YouTube', { iconKey: 'youtube', description: 'Publish videos to YouTube.' }),
+  siteChannel('Email', { iconKey: 'email', description: 'Send email campaigns to contacts.', organizationCount: 2 }),
+  siteChannel('SMS', { iconKey: 'sms', description: 'Send text messages to contacts.' }),
+  siteChannel('WhatsApp', { iconKey: 'whatsapp', description: 'Send messages on WhatsApp.' }),
+  siteChannel('LinkedIn', { iconKey: 'linkedin', description: 'Publish posts to LinkedIn.' }),
+];
 
 export function paged<T>(items: T[], overrides: Record<string, unknown> = {}) {
   return { items, page: 1, pageSize: 10, totalCount: items.length, totalPages: 1, ...overrides };
@@ -87,6 +161,8 @@ export function adminServer(options: AdminOptions = {}, overrides: Record<string
     'GET /v1/site/menu': () => jsonResponse(200, { items, permissions: [] }),
     'GET /v1/site/overview': () => jsonResponse(200, overview),
     'GET /v1/site/agencies?page=1&pageSize=10': () => jsonResponse(200, paged([organization('Northwind Foods')])),
+    'GET /v1/site/members?page=1&pageSize=10': () => jsonResponse(200, paged([siteMember('Ana Smith')])),
+    'GET /v1/site/channels': () => jsonResponse(200, builtInChannels),
     ...overrides,
   };
 }

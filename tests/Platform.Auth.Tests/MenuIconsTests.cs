@@ -17,11 +17,18 @@ public sealed partial class MenuIconsTests
     }
 
     [Fact]
-    public void ThereAreTenIcons_AndTheCircleIsAmongThem_BecauseItIsWhatAnUnknownNameFallsBackTo()
+    public void ThereAreFourteenIcons_AndTheCircleIsAmongThem_BecauseItIsWhatAnUnknownNameFallsBackTo()
     {
-        Assert.Equal(10, MenuIcons.All.Count);
+        Assert.Equal(14, MenuIcons.All.Count);
         Assert.Contains("circle", MenuIcons.All);
     }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("image")]
+    [InlineData("sparkles")]
+    [InlineData("calendar")]
+    public void TheIconsOfTheStudioPages_AreKnown(string icon) => Assert.True(MenuIcons.IsKnown(icon));
 
     [Theory]
     [InlineData("home", true)]

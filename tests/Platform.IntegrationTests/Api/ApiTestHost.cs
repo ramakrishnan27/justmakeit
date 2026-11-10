@@ -102,8 +102,38 @@ public sealed class ApiTestHost : IAsyncDisposable
         return await Client.SendAsync(request);
     }
 
-    public Task<HttpResponseMessage> PutAsync(string path, object? body = null, string? accessToken = null) =>
-        SendAsync(HttpMethod.Put, path, body, accessToken, null, null);
+    /// <param name="tokenCookie">Sent as the access token cookie named <paramref name="cookieName"/>, the way a browser carries it.</param>
+    public Task<HttpResponseMessage> PutAsync(
+        string path, object? body = null, string? accessToken = null, string? tokenCookie = null, string cookieName = MemberCookieName) =>
+        SendAsync(HttpMethod.Put, path, body, accessToken, tokenCookie, null, cookieName);
+
+    /// <summary>
+    /// The form a browser sends to create a channel: <c>multipart/form-data</c> with a name, a description and, when
+    /// <paramref name="icon"/> is given, the icon as a file part of the given type.
+    /// </summary>
+    public static MultipartFormDataContent ChannelForm(
+        string? name, string? description = null, byte[]? icon = null, string iconType = "image/png", string iconFileName = "icon.png")
+    {
+        var form = new MultipartFormDataContent();
+        if (name is not null)
+        {
+            form.Add(new StringContent(name), "name");
+        }
+
+        if (description is not null)
+        {
+            form.Add(new StringContent(description), "description");
+        }
+
+        if (icon is not null)
+        {
+            var file = new ByteArrayContent(icon);
+            file.Headers.ContentType = new MediaTypeHeaderValue(iconType);
+            form.Add(file, "icon", iconFileName);
+        }
+
+        return form;
+    }
 
     public Task<HttpResponseMessage> DeleteAsync(string path, string? accessToken = null) =>
         SendAsync(HttpMethod.Delete, path, null, accessToken, null, null);
@@ -120,7 +150,8 @@ public sealed class ApiTestHost : IAsyncDisposable
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
         {
-            request.Content = JsonContent.Create(body);
+            // Ready-made content (a multipart form) is sent as it is; anything else is sent as JSON.
+            request.Content = body as HttpContent ?? JsonContent.Create(body);
         }
 
         if (accessToken is not null)

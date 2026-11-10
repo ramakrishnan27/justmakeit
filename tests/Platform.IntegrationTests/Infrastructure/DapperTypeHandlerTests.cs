@@ -133,7 +133,7 @@ public sealed class ProbeRow
 
 /// <summary>The same mappings against a real PostgreSQL, through Npgsql.</summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class DapperRoundTripTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

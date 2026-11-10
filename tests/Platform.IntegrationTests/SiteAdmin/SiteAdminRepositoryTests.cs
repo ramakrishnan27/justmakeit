@@ -14,7 +14,7 @@ namespace Platform.IntegrationTests.SiteAdmin;
 /// to any table: everything platform-wide comes through functions that check the caller in the database.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private static readonly DateTimeOffset T0 = new(2026, 1, 1, 9, 0, 0, TimeSpan.Zero);
@@ -276,6 +276,156 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
         Assert.Equal(PostgresErrorCodes.InvalidParameterValue, attempt.SqlState);
     }
 
+    // --- ListMembersAsync --------------------------------------------------------------------
+
+    /// <summary>Gives the four memberships of the fixture names and dates, so the order and the fields can be asserted.</summary>
+    private async Task NameTheMembersAsync()
+    {
+        await using var owner = await _db.OpenOwnerAsync();
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE users SET full_name = 'Alpha Owner' WHERE id = $1", _alphaOwner);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE users SET full_name = 'Alpha Client Manager' WHERE id = $1", _alphaViewer);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE users SET full_name = 'Bravo Owner' WHERE id = $1", _bravoOwner);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE users SET full_name = 'Charlie Creator' WHERE id = $1", _charlieOwner);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE agency_members SET created_at = $2 WHERE user_id = $1", _alphaOwner, T0.UtcDateTime);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE agency_members SET created_at = $2 WHERE user_id = $1", _alphaViewer, T0.AddHours(1).UtcDateTime);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE agency_members SET created_at = $2 WHERE user_id = $1", _bravoOwner, T0.AddHours(2).UtcDateTime);
+        await DbTestSupport.ExecuteAsync(owner, "UPDATE agency_members SET created_at = $2 WHERE user_id = $1", _charlieOwner, T0.AddHours(3).UtcDateTime);
+    }
+
+    [Fact]
+    public async Task ListMembers_ReturnsEveryMembership_NewestFirst_WithThePersonAndTheirOrganization()
+    {
+        await NameTheMembersAsync();
+        await using (var owner = await _db.OpenOwnerAsync())
+        {
+            await DbTestSupport.ExecuteAsync(owner, "UPDATE agency_members SET is_active = false WHERE user_id = $1", _alphaViewer);
+        }
+
+        var page = await _repository.ListMembersAsync(_siteAdmin, 1, 20, CancellationToken.None);
+
+        Assert.Equal(4, page.TotalCount);
+        Assert.Equal(["Charlie Creator", "Bravo Owner", "Alpha Client Manager", "Alpha Owner"], page.Items.Select(m => m.FullName));
+        Assert.Equal(["charlie-owner@example.com", "bravo-owner@example.com", "alpha-viewer@example.com", "alpha-owner@example.com"], page.Items.Select(m => m.Email));
+        Assert.Equal([_charlieOwner, _bravoOwner, _alphaViewer, _alphaOwner], page.Items.Select(m => m.UserId));
+        Assert.Equal([_charlie, _bravo, _alpha, _alpha], page.Items.Select(m => m.AgencyId));
+        Assert.Equal(["Charlie", "Bravo", "Alpha", "Alpha"], page.Items.Select(m => m.AgencyName));
+        Assert.Equal([BusinessModel.Creator, BusinessModel.Company, BusinessModel.Agency, BusinessModel.Agency], page.Items.Select(m => m.BusinessModel));
+        Assert.Equal(
+            [OrganizationRole.ContentWriter, OrganizationRole.OrganizationAdmin, OrganizationRole.ClientManager, OrganizationRole.OrganizationAdmin],
+            page.Items.Select(m => m.Role));
+        Assert.Equal([true, true, false, true], page.Items.Select(m => m.IsActive));
+        Assert.Equal(T0.AddHours(3), page.Items[0].JoinedAt);
+        Assert.Equal(T0, page.Items[3].JoinedAt);
+    }
+
+    [Fact]
+    public async Task ListMembers_LeavesOutTheSiteAdmins_BecauseTheyBelongToNoOrganization()
+    {
+        var page = await _repository.ListMembersAsync(_siteAdmin, 1, 20, CancellationToken.None);
+
+        Assert.DoesNotContain(page.Items, m => m.UserId == _siteAdmin || m.UserId == _otherSiteAdmin);
+        Assert.Equal(4, page.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListMembers_ListsAPersonInTwoOrganizations_OnceForEach()
+    {
+        await using (var owner = await _db.OpenOwnerAsync())
+        {
+            await DbTestSupport.InsertMemberAsync(owner, _bravo, _alphaOwner, "contentwriter");
+        }
+
+        var page = await _repository.ListMembersAsync(_siteAdmin, 1, 20, CancellationToken.None);
+
+        Assert.Equal(5, page.TotalCount);
+        var rows = page.Items.Where(m => m.UserId == _alphaOwner).ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.Equivalent(new[] { _alpha, _bravo }, rows.Select(m => m.AgencyId));
+        Assert.Equal(OrganizationRole.ContentWriter, rows.Single(m => m.AgencyId == _bravo).Role);
+        Assert.Equal(OrganizationRole.OrganizationAdmin, rows.Single(m => m.AgencyId == _alpha).Role);
+    }
+
+    [Fact]
+    public async Task ListMembers_PagesThroughTheList_KeepingTheTotal()
+    {
+        await NameTheMembersAsync();
+
+        var first = await _repository.ListMembersAsync(_siteAdmin, 1, 3, CancellationToken.None);
+        var second = await _repository.ListMembersAsync(_siteAdmin, 2, 3, CancellationToken.None);
+
+        Assert.Equal(["Charlie Creator", "Bravo Owner", "Alpha Client Manager"], first.Items.Select(m => m.FullName));
+        Assert.Equal(["Alpha Owner"], second.Items.Select(m => m.FullName));
+        Assert.Equal(4, first.TotalCount);
+        Assert.Equal(4, second.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListMembers_BeyondTheLastPage_IsEmpty_ButStillReportsTheTotal()
+    {
+        var page = await _repository.ListMembersAsync(_siteAdmin, 9, 20, CancellationToken.None);
+
+        Assert.Empty(page.Items);
+        Assert.Equal(4, page.TotalCount);
+    }
+
+    [Fact]
+    public async Task ListMembers_IsRefused_ForAnAgencyOwner_AndForAnUnknownUser()
+    {
+        var owner = await Assert.ThrowsAsync<ForbiddenException>(
+            () => _repository.ListMembersAsync(_bravoOwner, 1, 20, CancellationToken.None));
+        var unknown = await Assert.ThrowsAsync<ForbiddenException>(
+            () => _repository.ListMembersAsync(Guid.NewGuid(), 1, 20, CancellationToken.None));
+
+        Assert.Equal("not_site_admin", owner.Code);
+        Assert.Equal("not_site_admin", unknown.Code);
+    }
+
+    [Fact]
+    public async Task ListMembers_IsRefusedByTheDatabaseItself_WhenCalledDirectlyByAnOrdinaryUser_AndWhenNoUserIsSet()
+    {
+        await using var asOwner = await _db.OpenAppAsync(_alpha, _alphaOwner);
+        await using var anonymous = await _db.OpenAppAsync();
+
+        var ordinary = await Assert.ThrowsAsync<PostgresException>(() => asOwner.QueryAsync("SELECT * FROM site_admin_list_members(10, 0)"));
+        var nobody = await Assert.ThrowsAsync<PostgresException>(() => anonymous.QueryAsync("SELECT * FROM site_admin_list_members(10, 0)"));
+
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, ordinary.SqlState);
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, nobody.SqlState);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(-1, 0)]
+    [InlineData(101, 0)]
+    [InlineData(10, -1)]
+    public async Task ListMembers_TheFunctionRefusesBadPagingByItself(int limit, int offset)
+    {
+        await using var asAdmin = await _db.OpenAppAsync(null, _siteAdmin);
+
+        var attempt = await Assert.ThrowsAsync<PostgresException>(
+            () => asAdmin.QueryAsync("SELECT * FROM site_admin_list_members(@limit, @offset)", new { limit, offset }));
+
+        Assert.Equal(PostgresErrorCodes.InvalidParameterValue, attempt.SqlState);
+    }
+
+    [Fact]
+    public async Task ListMembers_ReturnsOnlyWhatAListNeeds_NeverAPasswordHash()
+    {
+        await using var owner = await _db.OpenOwnerAsync();
+
+        var columns = (await owner.QueryAsync<string>(
+            """
+            SELECT a.name
+            FROM pg_proc p, unnest(p.proargnames, p.proargmodes) WITH ORDINALITY AS a(name, mode, position)
+            WHERE p.proname = 'site_admin_list_members' AND a.mode = 't'
+            ORDER BY a.position
+            """)).ToList();
+
+        Assert.Equal(
+            ["user_id", "full_name", "email", "agency_id", "agency_name", "business_model", "role", "is_active", "joined_at", "total_count"],
+            columns);
+    }
+
     [Fact]
     public async Task TheSiteAdminFunctions_AreSecurityDefiner_WithAFixedSearchPath_AndNotCallableByPublic()
     {
@@ -289,10 +439,10 @@ public sealed class SiteAdminRepositoryTests(PostgresFixture postgres) : IAsyncL
                    has_function_privilege('public', p.oid, 'EXECUTE')
             FROM pg_proc p
             WHERE p.pronamespace = 'public'::regnamespace
-              AND p.proname IN ('site_admin_overview', 'site_admin_list_agencies')
+              AND p.proname IN ('site_admin_overview', 'site_admin_list_agencies', 'site_admin_list_members')
             """)).ToList();
 
-        Assert.Equal(2, functions.Count);
+        Assert.Equal(3, functions.Count);
         Assert.All(functions, f =>
         {
             Assert.True(f.Definer, $"{f.Name} is not SECURITY DEFINER.");

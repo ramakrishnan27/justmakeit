@@ -24,7 +24,8 @@ public sealed class DbMigrator(IOptions<DatabaseSettings> options, ILogger<DbMig
         {
             throw new InvalidOperationException(
                 "ConnectionStrings:Migrator is not configured. Migrations run as the database owner, not as app_user. " +
-                "Set it with user-secrets or the ConnectionStrings__Migrator environment variable.");
+                "It belongs in appsettings.json, with its password in user-secrets (Database:MigratorPassword) " +
+                "or the Database__MigratorPassword environment variable.");
         }
 
         var scripts = LoadScripts();

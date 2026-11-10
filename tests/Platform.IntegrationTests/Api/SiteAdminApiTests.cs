@@ -7,7 +7,7 @@ namespace Platform.IntegrationTests.Api;
 
 /// <summary>The site admin console API end to end: sign-in, the token, the dashboard data and who may see it.</summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private const string AdminPassword = "the site admin password";
@@ -229,12 +229,79 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         Assert.Equal(3, beyond.GetProperty("totalCount").GetInt32());
     }
 
+    [Fact]
+    public async Task Members_ListsEveryMembership_NewestFirst_WithThePersonAndTheirOrganization_AndNoSecrets()
+    {
+        var alpha = await Host.RegisterAsync(agencyName: "Alpha");
+        var bravo = await Host.RegisterAsync(agencyName: "Bravo", businessModel: "company");
+        var session = await SiteLoginAsync();
+
+        var response = await SiteGetAsync("/v1/site/members", session);
+
+        AssertStatus(HttpStatusCode.OK, response);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        var page = await ApiTestHost.ReadJsonAsync(response);
+        Assert.Equal(1, page.GetProperty("page").GetInt32());
+        Assert.Equal(20, page.GetProperty("pageSize").GetInt32());
+        Assert.Equal(2, page.GetProperty("totalCount").GetInt32());   // the site admin has no membership
+        Assert.Equal(1, page.GetProperty("totalPages").GetInt32());
+        var items = page.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(["Bravo", "Alpha"], items.Select(i => i.GetProperty("agencyName").GetString()));
+        Assert.Equal(["company", "agency"], items.Select(i => i.GetProperty("businessModel").GetString()));
+        Assert.Equal(["organizationadmin", "organizationadmin"], items.Select(i => i.GetProperty("role").GetString()));
+        Assert.Equal([bravo.Email, alpha.Email], items.Select(i => i.GetProperty("email").GetString()));
+        Assert.Equal([bravo.UserId, alpha.UserId], items.Select(i => i.GetProperty("userId").GetGuid()));
+        Assert.Equal([bravo.AgencyId, alpha.AgencyId], items.Select(i => i.GetProperty("agencyId").GetGuid()));
+        Assert.Equal("Test User", items[0].GetProperty("fullName").GetString());
+        Assert.True(items[0].GetProperty("isActive").GetBoolean());
+        Assert.True(items[0].TryGetProperty("joinedAt", out _));
+        // Only what a list needs: nothing about a password, whatever the name.
+        Assert.Equal(
+            ["userId", "fullName", "email", "agencyId", "agencyName", "businessModel", "role", "isActive", "joinedAt"],
+            items[0].EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
+    public async Task Members_ShowsADeactivatedPersonAsNotActive()
+    {
+        var owner = await Host.RegisterAsync(agencyName: "Alpha");
+        await OwnerExecuteAsync("UPDATE agency_members SET is_active = false WHERE user_id = @id", new { id = owner.UserId });
+        var session = await SiteLoginAsync();
+
+        var page = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/members", session));
+
+        Assert.False(page.GetProperty("items")[0].GetProperty("isActive").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Members_Pages()
+    {
+        foreach (var name in new[] { "Alpha", "Bravo", "Charlie" })
+        {
+            await Host.RegisterAsync(agencyName: name);
+        }
+
+        var session = await SiteLoginAsync();
+
+        var first = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/members?page=1&pageSize=2", session));
+        var second = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/members?page=2&pageSize=2", session));
+        var beyond = await ApiTestHost.ReadJsonAsync(await SiteGetAsync("/v1/site/members?page=9&pageSize=2", session));
+
+        Assert.Equal(["Charlie", "Bravo"], first.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("agencyName").GetString()));
+        Assert.Equal(["Alpha"], second.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("agencyName").GetString()));
+        Assert.Equal(2, first.GetProperty("totalPages").GetInt32());
+        Assert.Equal(3, second.GetProperty("totalCount").GetInt32());
+        Assert.Empty(beyond.GetProperty("items").EnumerateArray());
+        Assert.Equal(3, beyond.GetProperty("totalCount").GetInt32());
+    }
+
     // --- Site admin and agency tokens never meet ---------------------------------------------
 
     [Theory]
     [InlineData("/v1/site/me")]
     [InlineData("/v1/site/overview")]
     [InlineData("/v1/site/agencies")]
+    [InlineData("/v1/site/members")]
     public async Task AnAgencyOwner_CannotUseTheSiteEndpoints(string path)
     {
         var owner = await Host.RegisterAsync();
@@ -322,11 +389,14 @@ public sealed class SiteAdminApiTests(PostgresFixture postgres) : AuthApiTestBas
         // through; it is the database function that says no.
         var overview = await SiteGetAsync("/v1/site/overview", session);
         var agencies = await SiteGetAsync("/v1/site/agencies", session);
+        var members = await SiteGetAsync("/v1/site/members", session);
         var me = await SiteGetAsync("/v1/site/me", session);
 
         AssertStatus(HttpStatusCode.Forbidden, overview);
         Assert.Equal("not_site_admin", await CodeOfAsync(overview));
         AssertStatus(HttpStatusCode.Forbidden, agencies);
+        AssertStatus(HttpStatusCode.Forbidden, members);
+        Assert.Equal("not_site_admin", await CodeOfAsync(members));
         AssertStatus(HttpStatusCode.Unauthorized, me);
         Assert.Equal("not_site_admin", await CodeOfAsync(me));
     }

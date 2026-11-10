@@ -10,7 +10,7 @@ const serverIcons = [...(serverSource.match(/All\s*=\s*\[([^\]]*)\]/s)?.[1] ?? '
 
 describe('iconNames', () => {
   it('finds the icons the server accepts', () => {
-    expect(serverIcons).toHaveLength(10);
+    expect(serverIcons).toHaveLength(14);
   });
 
   it('are exactly the icons the server accepts, in the same order', () => {
@@ -26,7 +26,7 @@ describe('resolveIcon', () => {
   });
 
   it('falls back to the circle for a name it cannot draw, and for anything that is not text', () => {
-    for (const name of ['sparkles', 'Home', '', 'constructor', 'toString', '__proto__', undefined, null, 5, {}]) {
+    for (const name of ['rocket', 'Home', 'Sparkles', '', 'constructor', 'toString', '__proto__', undefined, null, 5, {}]) {
       expect(resolveIcon(name), String(name)).toBe('circle');
     }
   });
@@ -54,7 +54,7 @@ describe('Icon', () => {
   });
 
   it('draws the circle for a name it does not know, and different things for different icons', () => {
-    expect(iconPaths('sparkles')).toEqual(iconPaths('circle'));
+    expect(iconPaths('rocket')).toEqual(iconPaths('circle'));
     expect(new Set(iconNames.map((name) => iconPaths(name).join('|'))).size).toBe(iconNames.length);
   });
 });

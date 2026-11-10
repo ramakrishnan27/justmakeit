@@ -12,4 +12,10 @@ public sealed class MembershipRecord
 
     /// <summary>False when an admin has deactivated this person: they cannot sign in to this organization.</summary>
     public bool IsActive { get; set; } = true;
+
+    /// <summary>False when the Site admin has deactivated the whole organization: nobody can sign in to it.</summary>
+    public bool OrganizationIsActive { get; set; } = true;
+
+    /// <summary>Whether this membership can be signed in to: the person and the organization are both active.</summary>
+    public bool CanSignIn => IsActive && OrganizationIsActive;
 }

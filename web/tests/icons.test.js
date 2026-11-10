@@ -9,7 +9,7 @@ const serverIcons = [...(serverSource.match(/All\s*=\s*\[([^\]]*)\]/s)?.[1] ?? '
 
 describe('iconNames', () => {
   it('finds the icons the server accepts', () => {
-    assert.equal(serverIcons.length, 10);
+    assert.equal(serverIcons.length, 14);
   });
 
   it('are exactly the icons the server accepts, in the same order', () => {
@@ -31,7 +31,7 @@ describe('resolveIcon', () => {
   });
 
   it('falls back to the circle for a name it cannot draw, and for anything that is not text', () => {
-    for (const name of ['sparkles', 'Home', '', 'constructor', 'toString', '__proto__', undefined, null, 5, {}]) {
+    for (const name of ['rocket', 'Home', 'Sparkles', '', 'constructor', 'toString', '__proto__', undefined, null, 5, {}]) {
       assert.equal(resolveIcon(name), 'circle', String(name));
     }
   });
@@ -102,7 +102,7 @@ describe('createIcon', () => {
 
   it('draws the circle for a name it does not know', () => {
     assert.deepEqual(
-      createIcon('sparkles').children.map((path) => path.attributes.d),
+      createIcon('rocket').children.map((path) => path.attributes.d),
       createIcon('circle').children.map((path) => path.attributes.d),
     );
   });

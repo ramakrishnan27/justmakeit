@@ -76,6 +76,17 @@ public sealed class SiteController(ISiteAdminAuthService auth, ISiteAdminDashboa
         return await dashboard.ListAgenciesAsync(query, cancellationToken);
     }
 
+    /// <summary>One page of every person on the platform with the organization they belong to, newest first. A person in two organizations is listed once for each.</summary>
+    [HttpGet("members")]
+    [Authorize(Policy = PolicyNames.SiteAdmin)]
+    [ProducesResponseType<PagedResult<SiteMemberResponse>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<PagedResult<SiteMemberResponse>>> Members(
+        [FromQuery] SiteMembersQuery query, CancellationToken cancellationToken)
+    {
+        query.Validate().ThrowIfAny();
+        return await dashboard.ListMembersAsync(query, cancellationToken);
+    }
+
     // The token leaves only through the cookie; the body says when it ends.
     private OkObjectResult Issue(AuthResult result)
     {

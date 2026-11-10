@@ -14,7 +14,7 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// before any user is known, and the rule that every user has a way in.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class ExternalIdentityMigrationTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

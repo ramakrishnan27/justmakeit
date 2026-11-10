@@ -201,7 +201,7 @@ public sealed class MenuEndpointTests : IAsyncLifetime
     [Fact]
     public async Task AddingAnItem_WithBadFields_ListsEachOne()
     {
-        var response = await _host.PostAsync("/v1/site/menus/member/items", new { pageKey = "Bad Key", label = " ", icon = "sparkles" }, SiteAdminToken());
+        var response = await _host.PostAsync("/v1/site/menus/member/items", new { pageKey = "Bad Key", label = " ", icon = "rocket" }, SiteAdminToken());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await ApiTestHost.ReadJsonAsync(response);

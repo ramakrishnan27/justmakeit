@@ -10,7 +10,8 @@ public sealed class DatabaseSettingsValidator : IValidateOptions<DatabaseSetting
         if (string.IsNullOrWhiteSpace(options.AppConnectionString))
         {
             return ValidateOptionsResult.Fail(
-                "ConnectionStrings:App is not configured. Set it with user-secrets or the ConnectionStrings__App " +
+                "ConnectionStrings:App is not configured. It belongs in appsettings.json (Host, Port, Database and " +
+                "Username=app_user), with its password in user-secrets (Database:AppPassword) or the Database__AppPassword " +
                 "environment variable; it must log in as the app_user role.");
         }
 

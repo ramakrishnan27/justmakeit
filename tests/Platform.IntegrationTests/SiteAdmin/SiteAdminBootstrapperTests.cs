@@ -12,7 +12,7 @@ namespace Platform.IntegrationTests.SiteAdmin;
 
 /// <summary>Creating the first site admin as the database owner, the way the app does right after migrating.</summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class SiteAdminBootstrapperTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private const string Password = "a long enough password";

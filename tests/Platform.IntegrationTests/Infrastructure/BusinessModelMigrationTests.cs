@@ -9,10 +9,10 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// <summary>
 /// <c>003_business_models.sql</c>: the business model columns, the table of allowed model and role pairs,
 /// the one-member rule for creators, and the upgrade of a database that still holds the released schema
-/// (roles owner, admin, manager, viewer). Docker-tagged like every test that needs a real PostgreSQL.
+/// (roles owner, admin, manager, viewer). Database-tagged like every test that needs a real PostgreSQL server.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class BusinessModelMigrationTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private const string RoleModelCheck = "ck_agency_members_role_model";

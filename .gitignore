@@ -13,6 +13,9 @@ TestResults/
 appsettings.*.local.json
 secrets.json
 
+# Uploaded files of the Media Library (Media:Storage:RootPath, by default App_Data/media under the API project)
+App_Data/
+
 # Node (frontend unit tests)
 node_modules/
 

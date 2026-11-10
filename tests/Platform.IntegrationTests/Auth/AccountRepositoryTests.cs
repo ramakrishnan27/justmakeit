@@ -14,7 +14,7 @@ namespace Platform.IntegrationTests.Auth;
 /// runs them. Rows are checked as the database owner, who sees everything.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class AccountRepositoryTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

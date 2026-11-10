@@ -11,7 +11,7 @@ namespace Platform.IntegrationTests.Infrastructure;
 /// an owner that row-level security binds.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class RefreshTokenRemovalMigrationTests(PostgresFixture postgres)
 {
     private static readonly string[] ReleasedScripts =

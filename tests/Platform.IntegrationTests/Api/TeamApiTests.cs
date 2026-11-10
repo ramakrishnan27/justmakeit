@@ -13,7 +13,7 @@ namespace Platform.IntegrationTests.Api;
 /// re-roled person's old token stops working at once. The API connects as <c>app_user</c>, as in production.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed partial class TeamApiTests(PostgresFixture postgres) : AuthApiTestBase(postgres)
 {
     private const string EmployeePassword = "employee password 123";

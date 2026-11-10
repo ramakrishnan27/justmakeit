@@ -84,6 +84,7 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     [InlineData("/v1/site/me")]
     [InlineData("/v1/site/overview")]
     [InlineData("/v1/site/agencies")]
+    [InlineData("/v1/site/members")]
     public async Task SiteEndpoints_AnswerAnAnonymousCaller_With401(string path)
     {
         Assert.Equal(HttpStatusCode.Unauthorized, (await _host.GetAsync(path)).StatusCode);
@@ -94,6 +95,8 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     [InlineData(OrganizationRole.ClientManager, "/v1/site/overview")]
     [InlineData(OrganizationRole.MarketingManager, "/v1/site/agencies")]
     [InlineData(OrganizationRole.ContentWriter, "/v1/site/overview")]
+    [InlineData(OrganizationRole.OrganizationAdmin, "/v1/site/members")]
+    [InlineData(OrganizationRole.ContentWriter, "/v1/site/members")]
     public async Task SiteEndpoints_AreForbidden_ForEveryOrganizationRole_EvenTheOrganizationAdmin(OrganizationRole role, string path)
     {
         Assert.Equal(HttpStatusCode.Forbidden, (await _host.GetAsync(path, Token(role))).StatusCode);
@@ -142,6 +145,27 @@ public sealed class AuthorizationEndpointTests : IAsyncLifetime
     public async Task TheAgencyListRefusesAPageThatIsNotANumber()
     {
         var response = await _host.GetAsync("/v1/site/agencies?page=abc", SiteAdminToken());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("page=0", "page")]
+    [InlineData("page=-2", "page")]
+    [InlineData("pageSize=0", "pageSize")]
+    [InlineData("pageSize=101", "pageSize")]
+    public async Task TheMemberListRefusesBadPaging_BeforeAskingTheDatabase(string query, string field)
+    {
+        var response = await _host.GetAsync($"/v1/site/members?{query}", SiteAdminToken());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True((await ApiTestHost.ReadJsonAsync(response)).GetProperty("errors").TryGetProperty(field, out _));
+    }
+
+    [Fact]
+    public async Task TheMemberListRefusesAPageThatIsNotANumber()
+    {
+        var response = await _host.GetAsync("/v1/site/members?page=abc", SiteAdminToken());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

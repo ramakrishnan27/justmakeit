@@ -13,7 +13,7 @@ namespace Platform.IntegrationTests.Api;
 /// with real credentials.
 /// </summary>
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class GoogleApiTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private const string ClientId = "client-123.apps.googleusercontent.com";

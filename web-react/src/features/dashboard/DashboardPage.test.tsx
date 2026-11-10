@@ -43,9 +43,9 @@ describe('the dashboard', () => {
 
     const abilities = within(section('What you can do'));
     const row = (text: string) => abilities.getByText(text).closest('li')!;
-    expect(within(row('View the workspaces and everything in them')).getByText('Yes')).toBeTruthy();
+    expect(within(row('View the products and everything in them')).getByText('Yes')).toBeTruthy();
     expect(within(row('Create and change content')).getByText('Yes')).toBeTruthy();
-    expect(within(row('Add workspaces and manage the team')).getByText('Not for your role')).toBeTruthy();
+    expect(within(row('Add products and manage the team')).getByText('Not for your role')).toBeTruthy();
   });
 
   it('lists the permissions of the token and the claims it was made with', async () => {

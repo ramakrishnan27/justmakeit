@@ -330,6 +330,30 @@ public sealed class GoogleSignInServiceTests
         Assert.Equal(GoogleSignInErrors.NoOrganization, (await CompleteAsync(cookie, state)).ErrorCode);
     }
 
+    [Theory]
+    [InlineData("account_deactivated", GoogleSignInErrors.AccountDeactivated)]
+    [InlineData("organization_deactivated", GoogleSignInErrors.OrganizationDeactivated)]
+    [InlineData("no_agency", GoogleSignInErrors.NoOrganization)]
+    [InlineData("anything_else", GoogleSignInErrors.NoOrganization)]
+    public async Task Complete_ForAKnownGoogleUserWhoCannotSignIn_SaysWhyInItsOwnWords(string refusal, string expected)
+    {
+        _accounts.FindUserIdByIdentityAsync("google", "sub-maya", Arg.Any<CancellationToken>()).Returns(Guid.NewGuid());
+        _auth.LoginExternalAsync(default, default).ThrowsAsyncForAnyArgs(new ForbiddenException("refused", refusal));
+        var (cookie, state, _) = Started(Login());
+
+        var outcome = await CompleteAsync(cookie, state);
+
+        Assert.Equal(expected, outcome.ErrorCode);
+        Assert.Null(outcome.Session);
+    }
+
+    [Fact]
+    public void TheDeactivatedErrorCodes_AreTheOnesTheWebClientHasWordsFor()
+    {
+        Assert.Equal("google_account_deactivated", GoogleSignInErrors.AccountDeactivated);
+        Assert.Equal("google_organization_deactivated", GoogleSignInErrors.OrganizationDeactivated);
+    }
+
     // --- Complete: an address that already has an account ------------------------------------
 
     [Theory]

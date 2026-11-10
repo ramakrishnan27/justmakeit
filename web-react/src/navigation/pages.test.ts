@@ -4,12 +4,17 @@ import { readRepositoryFile } from '@/test/repo';
 import { adminPages } from './adminPages';
 import { pages } from './pages';
 
-// The pages a menu may link to are seeded by the database (005_menus_permissions.sql, and the Team page by 007_team_members.sql); the pages that exist are the
+// The pages a menu may link to are seeded by the database (005_menus_permissions.sql, the Team page by 007_team_members.sql, and the Site admin's
+// Users and Channels pages by 010_site_admin_users.sql, the member's Platform page by 012_member_platforms.sql, the four placeholder pages
+// (Content Studio, Media Library, AI Studio, Calendar) by 013_member_studio_menu.sql); the pages that exist are the
 // page table's rows. They must say the same thing, or a menu item would open a page the client does not have, or the
 // client would guard a page with another permission than the server's menu does. This reads the seed script and compares.
 const script = [
   'src/Platform.Core/Infrastructure/Migrations/005_menus_permissions.sql',
   'src/Platform.Core/Infrastructure/Migrations/007_team_members.sql',
+  'src/Platform.Core/Infrastructure/Migrations/010_site_admin_users.sql',
+  'src/Platform.Core/Infrastructure/Migrations/012_member_platforms.sql',
+  'src/Platform.Core/Infrastructure/Migrations/013_member_studio_menu.sql',
 ]
   .map(readRepositoryFile)
   .join('\n');
@@ -26,7 +31,21 @@ const seededAdmin = seeded.filter((page) => page.app === 'admin');
 
 describe('the pages the database lets a menu link to', () => {
   it('finds them in the seed script', () => {
-    expect(seeded.map((page) => `${page.app}:${page.path}`)).toEqual(['member:/dashboard', 'member:/workspaces', 'admin:/admin', 'admin:/admin/menus', 'admin:/admin/permissions', 'member:/team']);
+    expect(seeded.map((page) => `${page.app}:${page.path}`)).toEqual([
+      'member:/dashboard',
+      'member:/workspaces',
+      'admin:/admin',
+      'admin:/admin/menus',
+      'admin:/admin/permissions',
+      'member:/team',
+      'admin:/admin/users',
+      'admin:/admin/channels',
+      'member:/platforms',
+      'member:/content-studio',
+      'member:/media-library',
+      'member:/ai-studio',
+      'member:/calendar',
+    ]);
   });
 
   it('are all pages this app has (the Site admin pages belong to the Site admin app)', () => {

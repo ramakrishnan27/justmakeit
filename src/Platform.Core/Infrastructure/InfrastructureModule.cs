@@ -19,8 +19,11 @@ public static class InfrastructureModule
         // so every configuration source (user-secrets, environment, test overrides) has been added by then.
         services.AddOptions<DatabaseSettings>().Configure<IConfiguration>((settings, configuration) =>
         {
-            settings.AppConnectionString = configuration.GetConnectionString(DatabaseSettings.AppConnectionName) ?? string.Empty;
-            settings.MigratorConnectionString = configuration.GetConnectionString(DatabaseSettings.MigratorConnectionName) ?? string.Empty;
+            // The strings are in appsettings.json without passwords; each password is set apart and joined here.
+            settings.AppConnectionString = ConnectionPasswords.Apply(
+                configuration.GetConnectionString(DatabaseSettings.AppConnectionName), configuration[ConnectionPasswords.AppPasswordKey]);
+            settings.MigratorConnectionString = ConnectionPasswords.Apply(
+                configuration.GetConnectionString(DatabaseSettings.MigratorConnectionName), configuration[ConnectionPasswords.MigratorPasswordKey]);
             settings.MigrateOnStartup = configuration.GetValue<bool>("Database:MigrateOnStartup");
         });
         services.AddSingleton<IValidateOptions<DatabaseSettings>, DatabaseSettingsValidator>();

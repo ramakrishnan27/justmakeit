@@ -9,6 +9,8 @@ function OrganizationCard({ organization }: { organization: SiteOrganization }) 
       <div className="agency-badges">
         <Badge tone="model">{businessModelLabel(organization.businessModel)}</Badge>
         <Badge tone={organization.plan === 'paid' ? 'paid' : 'trial'}>{planLabel(organization.plan)}</Badge>
+        {/* The dashboard only shows it; deactivating is done from Users, Organizations. */}
+        {organization.isActive === false ? <Badge tone="danger">Inactive</Badge> : null}
       </div>
       <dl className="agency-facts">
         <div>

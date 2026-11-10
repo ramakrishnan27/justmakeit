@@ -4,7 +4,7 @@ using Platform.IntegrationTests.Infrastructure;
 namespace Platform.IntegrationTests.Infrastructure;
 
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;
@@ -76,8 +76,10 @@ public sealed class MigrationTests(PostgresFixture postgres) : IAsyncLifetime
         // 001_init.sql has five tables, 002_site_admin.sql two more, 004_external_identities.sql one and
         // 005_menus_permissions.sql five, 006_remove_refresh_tokens.sql drops the two that held refresh tokens
         // (001 and 002 create them again on every run and 006 drops them again) and 007_team_members.sql adds
-        // member_invitations and session_revocations; a second run adds none.
-        Assert.Equal(13, await DbTestSupport.ScalarAsync<long>(
+        // member_invitations and session_revocations, 011_channels.sql two more (channels, organization_channels; this
+        // assertion still said 13 after it, so it was already stale), 014_content_studio.sql fourteen and
+        // 016_media_library.sql ten (media_assets and the nine tables around it); a second run adds none.
+        Assert.Equal(39, await DbTestSupport.ScalarAsync<long>(
             owner,
             "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
             "WHERE n.nspname = 'public' AND c.relkind = 'r'"));

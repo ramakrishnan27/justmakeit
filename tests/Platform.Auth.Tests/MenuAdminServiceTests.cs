@@ -148,7 +148,7 @@ public sealed class MenuAdminServiceTests
     public async Task Create_WithBadFields_IsABadRequest_ListingEachOne_AndCallsNothing()
     {
         var exception = await Assert.ThrowsAsync<BadRequestException>(
-            () => _service.CreateItemAsync(MenuKeys.Member, new CreateMenuItemRequest("Bad Key", " ", "sparkles", null), CancellationToken.None));
+            () => _service.CreateItemAsync(MenuKeys.Member, new CreateMenuItemRequest("Bad Key", " ", "rocket", null), CancellationToken.None));
 
         Assert.Equal(["icon", "label", "pageKey"], exception.Errors!.Keys.Order());
         Assert.Empty(_menus.ReceivedCalls());

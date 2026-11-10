@@ -20,7 +20,7 @@ export const businessModels: readonly BusinessModelChoice[] = [
   {
     value: 'agency',
     title: 'Marketing agency',
-    description: 'An agency that serves several clients, with a workspace for each. Adds the Client Manager role.',
+    description: 'An agency that serves several clients, with a space for each client. Adds the Client Manager role.',
   },
   {
     value: 'creator',
@@ -39,12 +39,12 @@ const roleTitles: Record<OrganizationRole, string> = {
 /** What each role is responsible for, in each kind of organization. */
 const responsibilitiesByModel: Record<BusinessModel, Partial<Record<OrganizationRole, string>>> = {
   company: {
-    organizationadmin: 'Creates and manages the company workspace, users, permissions and social accounts.',
+    organizationadmin: 'Creates and manages the company products, users, permissions and social accounts.',
     marketingmanager: 'Plans campaigns, manages marketing strategy, reviews content and manages publishing schedules.',
     contentwriter: 'Generates content using AI, writes captions, creates post ideas and submits content for approval.',
   },
   agency: {
-    organizationadmin: 'Manages agency workspace, employees, client accounts, permissions and integrations.',
+    organizationadmin: 'Manages the agency clients, employees, client accounts, permissions and integrations.',
     clientmanager: 'Manages individual client relationships, requirements, feedback and client approvals.',
     marketingmanager: 'Plans campaigns, assigns content tasks, reviews quality and oversees publishing.',
     contentwriter: 'Creates AI-generated and manually written content for assigned clients.',
@@ -118,15 +118,35 @@ export function hasTeam(model: string | null | undefined): boolean {
   return model === 'company' || model === 'agency';
 }
 
-/** What to call a workspace in this kind of organization: an agency has one per client. */
+/**
+ * What to call a workspace in this kind of organization. Words on screen only: the route, the permissions and the API
+ * still say workspace. An agency has one per client, a company calls them products, a creator has the one.
+ */
 export function workspaceWords(model: string | null | undefined): { one: string; many: string } {
   if (model === 'agency') {
-    return { one: 'client workspace', many: 'Client workspaces' };
+    return { one: 'client', many: 'Clients' };
+  }
+  if (model === 'company') {
+    return { one: 'product', many: 'Products' };
   }
   if (model === 'creator') {
     return { one: 'workspace', many: 'Your workspace' };
   }
   return { one: 'workspace', many: 'Workspaces' };
+}
+
+/** The label the server seeded for the workspaces page, which the Site admin may have renamed. */
+const defaultWorkspacesLabel = 'Workspaces';
+
+/**
+ * The sidebar label of the workspaces page. The menu is data, the same for every kind of organization, so the page
+ * shows the kind's own word while the label is still the seeded one; a label the Site admin renamed is kept.
+ */
+export function workspaceMenuLabel(model: string | null | undefined, serverLabel: string): string {
+  if (serverLabel !== defaultWorkspacesLabel) {
+    return serverLabel;
+  }
+  return model === 'agency' || model === 'company' ? workspaceWords(model).many : serverLabel;
 }
 
 /** The label of the organization name field while filling in the sign-up form. */

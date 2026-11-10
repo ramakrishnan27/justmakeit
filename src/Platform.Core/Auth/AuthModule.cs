@@ -50,6 +50,8 @@ public static class AuthModule
         services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
+        services.AddScoped<IPlatformRepository, PlatformRepository>();
+        services.AddScoped<IPlatformService, PlatformService>();
 
         // The team: inviting, changing and removing people. Ending a session is held in memory like the permissions,
         // so refusing a removed member's token reads no database per request.
@@ -66,6 +68,9 @@ public static class AuthModule
         services.AddScoped<ISiteAdminRepository, SiteAdminRepository>();
         services.AddScoped<ISiteAdminAuthService, SiteAdminAuthService>();
         services.AddScoped<ISiteAdminDashboardService, SiteAdminDashboardService>();
+        services.AddScoped<ISiteChannelRepository, SiteChannelRepository>();
+        services.AddScoped<ISiteChannelService, SiteChannelService>();
+        services.AddScoped<ISiteOrganizationService, SiteOrganizationService>();
         services.AddSingleton<ISiteAdminBootstrapper, SiteAdminBootstrapper>();
 
         // Continue with Google: off until Google:ClientId and Google:ClientSecret are set.

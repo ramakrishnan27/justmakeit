@@ -14,7 +14,11 @@ public static class WebApplicationExtensions
     /// under /admin. A page that a menu item links to needs its address here, or reloading it would answer 404; a test
     /// checks that every address in <c>menu_pages</c> serves the app shell.
     /// </summary>
-    private static readonly string[] MemberAppPages = ["login", "register", "dashboard", "workspaces", "team", "accept-invite", "account"];
+    private static readonly string[] MemberAppPages =
+    [
+        "login", "register", "dashboard", "content-studio", "media-library", "ai-studio", "calendar",
+        "workspaces", "platforms", "team", "accept-invite", "account"
+    ];
 
     /// <summary>
     /// Runs before the first request: stops the app on invalid configuration, then applies migrations
@@ -62,6 +66,10 @@ public static class WebApplicationExtensions
         {
             app.MapFallbackToFile(page, "index.html", options).AllowAnonymous();
         }
+
+        // Content Studio has pages under its own address: /content-studio/new and /content-studio/{id} (the editor), which are not
+        // menu items. Only this one address has a deeper part: /dashboard/anything and the others stay a real 404.
+        app.MapFallbackToFile("content-studio/{*path}", "index.html", options).AllowAnonymous();
 
         return app;
     }

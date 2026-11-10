@@ -25,8 +25,34 @@ public sealed partial class PermissionKeysTests
     }
 
     [Fact]
-    public void ThereAreSevenKeys_SoAddingOneMeansSeedingItAndSayingWhoGetsIt() =>
-        Assert.Equal(7, PermissionKeys.All.Count);
+    public void ThereAreSixteenKeys_SoAddingOneMeansSeedingItAndSayingWhoGetsIt() =>
+        Assert.Equal(16, PermissionKeys.All.Count);
+
+    [Theory]
+    [InlineData(PermissionKeys.MediaLibraryCreate, "medialibrary.create")]
+    [InlineData(PermissionKeys.MediaLibraryDelete, "medialibrary.delete")]
+    public void TheMediaLibraryActionKeys_ShareTheOneWordPrefixOfTheView(string key, string expected)
+    {
+        Assert.Equal(expected, key);
+        Assert.StartsWith(PermissionKeys.MediaLibraryView.Split('.')[0] + ".", key);
+    }
+
+    [Theory]
+    [InlineData(PermissionKeys.ContentStudioCreate, "contentstudio.create")]
+    [InlineData(PermissionKeys.ContentStudioPublish, "contentstudio.publish")]
+    public void TheContentStudioActionKeys_ShareTheOneWordPrefixOfTheView(string key, string expected)
+    {
+        Assert.Equal(expected, key);
+        Assert.StartsWith(PermissionKeys.ContentStudioView.Split('.')[0] + ".", key);
+    }
+
+    [Theory]
+    [InlineData(PermissionKeys.ContentStudioView, "contentstudio.view")]
+    [InlineData(PermissionKeys.MediaLibraryView, "medialibrary.view")]
+    [InlineData(PermissionKeys.AiStudioView, "aistudio.view")]
+    [InlineData(PermissionKeys.CalendarView, "calendar.view")]
+    public void ThePlaceholderPages_HaveOneWordKeys_BecauseTheFirstSegmentOfAKeyAllowsNoUnderscore(string key, string expected) =>
+        Assert.Equal(expected, key);
 
     [Fact]
     public void EveryKey_HasTheShapeTheDatabaseAccepts()

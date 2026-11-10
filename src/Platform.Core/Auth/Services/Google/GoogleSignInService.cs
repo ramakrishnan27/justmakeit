@@ -27,6 +27,12 @@ public static class GoogleSignInErrors
     public const string EmailTaken = "google_email_taken";
     public const string NoAccount = "google_no_account";
     public const string NoOrganization = "google_no_organization";
+
+    /// <summary>The person's own account was deactivated by an organization admin.</summary>
+    public const string AccountDeactivated = "google_account_deactivated";
+
+    /// <summary>The whole organization was deactivated by the Site admin.</summary>
+    public const string OrganizationDeactivated = "google_organization_deactivated";
 }
 
 /// <summary>Where to send the browser, and the encrypted state to keep in a short-lived cookie meanwhile.</summary>
@@ -209,10 +215,18 @@ public sealed class GoogleSignInService(
         {
             return new GoogleSignInOutcome(await auth.LoginExternalAsync(userId, cancellationToken), null, intent);
         }
-        catch (ForbiddenException)
+        catch (ForbiddenException exception)
         {
-            // The account exists but belongs to no organization.
-            return Failure(GoogleSignInErrors.NoOrganization, intent);
+            // Said only now, after Google has vouched for the person, so it tells nobody that an address has an account. The
+            // two deactivations have their own words; anything else is an account that belongs to no organization.
+            return Failure(
+                exception.Code switch
+                {
+                    "account_deactivated" => GoogleSignInErrors.AccountDeactivated,
+                    "organization_deactivated" => GoogleSignInErrors.OrganizationDeactivated,
+                    _ => GoogleSignInErrors.NoOrganization
+                },
+                intent);
         }
     }
 

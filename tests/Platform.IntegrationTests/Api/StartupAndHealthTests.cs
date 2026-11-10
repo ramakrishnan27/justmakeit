@@ -258,7 +258,7 @@ public sealed class HealthAndHostingTests
 }
 
 [Collection(PostgresCollection.Name)]
-[Trait("Category", "Docker")]
+[Trait("Category", "Database")]
 public sealed class HealthWithDatabaseTests(PostgresFixture postgres) : IAsyncLifetime
 {
     private TestDatabase _db = null!;

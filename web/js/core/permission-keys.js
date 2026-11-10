@@ -13,6 +13,15 @@ export const permissionKeys = Object.freeze({
   dataWrite: 'data.write',
   organizationManage: 'organization.manage',
   membersManage: 'members.manage',
+  platformsView: 'platforms.view',
+  contentStudioView: 'contentstudio.view',
+  mediaLibraryView: 'medialibrary.view',
+  aiStudioView: 'aistudio.view',
+  calendarView: 'calendar.view',
+  contentStudioCreate: 'contentstudio.create',
+  contentStudioPublish: 'contentstudio.publish',
+  mediaLibraryCreate: 'medialibrary.create',
+  mediaLibraryDelete: 'medialibrary.delete',
 });
 
 /**

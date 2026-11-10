@@ -14,7 +14,7 @@ public sealed class MembershipRepository(IDbConnectionFactory connections) : IMe
         await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
         var rows = await connection.QueryAsync<MembershipRecord>(new CommandDefinition(
             """
-            SELECT m.agency_id, a.name AS agency_name, m.business_model, m.role, m.is_active
+            SELECT m.agency_id, a.name AS agency_name, m.business_model, m.role, m.is_active, a.is_active AS organization_is_active
             FROM agency_members m
             JOIN agencies a ON a.id = m.agency_id
             WHERE m.user_id = @userId
@@ -30,7 +30,7 @@ public sealed class MembershipRepository(IDbConnectionFactory connections) : IMe
         await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
         return await connection.QuerySingleOrDefaultAsync<MembershipRecord>(new CommandDefinition(
             """
-            SELECT m.agency_id, a.name AS agency_name, m.business_model, m.role, m.is_active
+            SELECT m.agency_id, a.name AS agency_name, m.business_model, m.role, m.is_active, a.is_active AS organization_is_active
             FROM agency_members m
             JOIN agencies a ON a.id = m.agency_id
             WHERE m.user_id = @userId AND m.agency_id = @agencyId

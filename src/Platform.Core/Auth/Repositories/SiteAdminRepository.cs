@@ -48,8 +48,8 @@ public sealed class SiteAdminRepository(IDbConnectionFactory connections) : ISit
         {
             var rows = (await connection.QueryAsync<SiteAgencyRecord>(new CommandDefinition(
                 """
-                SELECT id, name, business_model, plan, created_at, member_count, workspace_count, total_count
-                FROM site_admin_list_agencies_v2(@limit, @offset)
+                SELECT id, name, business_model, plan, created_at, member_count, workspace_count, is_active, channel_count, total_count
+                FROM site_admin_list_agencies_v3(@limit, @offset)
                 """,
                 new { limit = pageSize, offset = (page - 1) * pageSize },
                 cancellationToken: cancellationToken))).AsList();
@@ -63,6 +63,54 @@ public sealed class SiteAdminRepository(IDbConnectionFactory connections) : ISit
             throw NotASiteAdmin();
         }
     }
+
+    public async Task<SiteMemberPage> ListMembersAsync(Guid userId, int page, int pageSize, CancellationToken cancellationToken)
+    {
+        await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
+        try
+        {
+            var rows = (await connection.QueryAsync<SiteMemberRecord>(new CommandDefinition(
+                """
+                SELECT user_id, full_name, email, agency_id, agency_name, business_model, role, is_active, joined_at, total_count
+                FROM site_admin_list_members(@limit, @offset)
+                """,
+                new { limit = pageSize, offset = (page - 1) * pageSize },
+                cancellationToken: cancellationToken))).AsList();
+
+            // A page past the end returns no rows, and so no total. Ask again for the count alone (every membership is one row).
+            var total = rows.Count > 0 ? rows[0].TotalCount : await CountMembersAsync(connection, cancellationToken);
+            return new SiteMemberPage(rows, total);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            throw NotASiteAdmin();
+        }
+    }
+
+    public async Task<bool> SetOrganizationActiveAsync(Guid userId, Guid agencyId, bool isActive, CancellationToken cancellationToken)
+    {
+        await using var connection = await connections.OpenAsync(null, userId, cancellationToken);
+        try
+        {
+            return await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                "SELECT site_admin_set_organization_active(@agencyId, @isActive)",
+                new { agencyId, isActive },
+                cancellationToken: cancellationToken));
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+        {
+            throw NotASiteAdmin();
+        }
+        catch (PostgresException exception)
+            when (exception.SqlState == PostgresErrorCodes.RaiseException && exception.MessageText == "organization_not_found")
+        {
+            throw new NotFoundException("That organization does not exist.", "organization_not_found");
+        }
+    }
+
+    private static async Task<long> CountMembersAsync(NpgsqlConnection connection, CancellationToken cancellationToken) =>
+        await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+            "SELECT member_count FROM site_admin_overview()", cancellationToken: cancellationToken));
 
     private static async Task<long> CountAgenciesAsync(NpgsqlConnection connection, CancellationToken cancellationToken) =>
         await connection.ExecuteScalarAsync<long>(new CommandDefinition(

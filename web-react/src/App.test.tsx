@@ -71,7 +71,7 @@ describe('the route guards', () => {
     await heading('Welcome, Ana');
 
     const menu = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(menu).getAllByRole('link').map((link) => link.textContent)).toEqual(['Dashboard', 'Workspaces']);
+    expect(within(menu).getAllByRole('link').map((link) => link.textContent)).toEqual(['Dashboard', 'Products']);
     expect(document.getElementById('shell-nav')?.contains(menu)).toBe(true);
   });
 
@@ -116,7 +116,7 @@ describe('components that load by permission', () => {
   it('opens a page for a person whose token holds its permission', async () => {
     await renderApp('/workspaces', memberServer({}, { 'GET /v1/workspaces': () => jsonResponse(200, []) }));
 
-    expect(await heading('Workspaces')).toBeTruthy();
+    expect(await heading('Products')).toBeTruthy();
   });
 
   it('never mounts a page the token does not allow: the person sees "no access" and the page makes no request', async () => {
@@ -139,7 +139,7 @@ describe('components that load by permission', () => {
         'GET /v1/menu': () => jsonResponse(200, { items: [workspacesItem], permissions }),
       }),
     );
-    await heading('Workspaces');
+    await heading('Products');
 
     permissions = ['dashboard.view']; // the Site admin took workspaces.view away
     await act(async () => {
@@ -154,15 +154,15 @@ describe('components that load by permission', () => {
     await heading('Welcome, Ana');
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Workspaces']);
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Products']);
   });
 
   it('marks the link of the open page', async () => {
     await renderApp('/workspaces', memberServer({}, { 'GET /v1/workspaces': () => jsonResponse(200, []) }));
-    await heading('Workspaces');
+    await heading('Products');
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByRole('link', { name: 'Workspaces' }).getAttribute('aria-current')).toBe('page');
+    expect(within(nav).getByRole('link', { name: 'Products' }).getAttribute('aria-current')).toBe('page');
     expect(within(nav).getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull();
   });
 
@@ -177,8 +177,8 @@ describe('components that load by permission', () => {
     const { fetchFn } = await renderApp('/dashboard', memberServer({}, { 'GET /v1/workspaces': () => jsonResponse(200, []) }));
     await heading('Welcome, Ana');
 
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Workspaces' }));
-    await heading('Workspaces');
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Products' }));
+    await heading('Products');
 
     expect(fetchFn.calls.filter((call) => call.path === '/v1/menu')).toHaveLength(1);
   });
@@ -231,8 +231,8 @@ describe('the drawer on a narrow screen', () => {
     expect(nav().className).not.toContain('is-open');
 
     open();
-    fireEvent.click(within(nav()).getByRole('link', { name: 'Workspaces' }));
-    await heading('Workspaces');
+    fireEvent.click(within(nav()).getByRole('link', { name: 'Products' }));
+    await heading('Products');
     await waitFor(() => expect(nav().className).not.toContain('is-open'));
   });
 

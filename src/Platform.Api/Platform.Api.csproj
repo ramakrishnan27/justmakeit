@@ -9,8 +9,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Platform.Content\Platform.Content.csproj" />
     <ProjectReference Include="..\Platform.Core\Platform.Core.csproj" />
     <ProjectReference Include="..\Platform.Email\Platform.Email.csproj" />
+    <ProjectReference Include="..\Platform.Media\Platform.Media.csproj" />
   </ItemGroup>
 
 </Project>
